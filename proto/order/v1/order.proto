@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package order.v1;
+
+import "google/api/annotations.proto";
+
+option go_package = "github.com/vladiant/choreography-saga/order/internal/pb/order/v1;orderv1";
+
+// OrderService is the saga entry point (order-trigger interface, tech-stack §11).
+// Exposed as gRPC and, via grpc-gateway, as REST.
+service OrderService {
+  // CreateOrder persists a PENDING order and starts the saga (FR-4, FR-5).
+  rpc CreateOrder(CreateOrderRequest) returns (CreateOrderResponse) {
+    option (google.api.http) = {
+      post: "/v1/orders"
+      body: "*"
+    };
+  }
+
+  // GetOrder returns the current saga state of an order (FR-8).
+  rpc GetOrder(GetOrderRequest) returns (GetOrderResponse) {
+    option (google.api.http) = {
+      get: "/v1/orders/{order_id}"
+    };
+  }
+}
+
+message CreateOrderRequest {
+  string sku = 1;
+  int32 quantity = 2;
+  double amount = 3;
+  string customer_id = 4;
+}
+
+message CreateOrderResponse {
+  string order_id = 1;
+  string status = 2;
+}
+
+message GetOrderRequest {
+  string order_id = 1;
+}
+
+message GetOrderResponse {
+  string order_id = 1;
+  string status = 2;
+  string sku = 3;
+  int32 quantity = 4;
+  double amount = 5;
+}

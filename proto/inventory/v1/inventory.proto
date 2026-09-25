@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package inventory.v1;
+
+option go_package = "github.com/vladiant/choreography-saga/order/internal/pb/inventory/v1;inventoryv1";
+
+// InventoryService is the single synchronous gRPC leg of the saga (tech-stack §6,
+// C-10, FR-15, FR-16). Payment calls ReserveStock; compensation uses ReleaseStock.
+service InventoryService {
+  rpc ReserveStock(ReserveStockRequest) returns (ReserveStockResponse);
+  rpc ReleaseStock(ReleaseStockRequest) returns (ReleaseStockResponse);
+}
+
+message ReserveStockRequest {
+  string saga_id = 1;
+  string idempotency_key = 2;
+  string sku = 3;
+  int32 quantity = 4;
+}
+
+message ReserveStockResponse {
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    RESERVED = 1;
+    INSUFFICIENT_STOCK = 2;
+  }
+  Status status = 1;
+  string reservation_id = 2;
+  string message = 3;
+}
+
+message ReleaseStockRequest {
+  string saga_id = 1;
+  string reservation_id = 2;
+  string idempotency_key = 3;
+}
+
+message ReleaseStockResponse {
+  bool released = 1;
+}

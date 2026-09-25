@@ -1,0 +1,7 @@
+# CMake / build output
+build/
+cmake-build-*/
+_deps/
+
+# vcpkg installed tree (manifest mode)
+vcpkg_installed/

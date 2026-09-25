@@ -1,0 +1,23 @@
+{
+  "name": "inventory-service",
+  "version-string": "0.1.0",
+  "description": "Inventory service (C++20) for the Choreography Saga Demo",
+  "dependencies": [
+    "nlohmann-json",
+    {
+      "name": "grpc",
+      "features": []
+    },
+    "protobuf",
+    "librdkafka",
+    "libpqxx",
+    {
+      "name": "opentelemetry-cpp",
+      "features": ["otlp-grpc"]
+    },
+    {
+      "name": "gtest",
+      "host": false
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS processed_messages;
+DROP TABLE IF EXISTS outbox;
+DROP TABLE IF EXISTS payments;

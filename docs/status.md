@@ -10,9 +10,9 @@ New-project chain: **requirements-analyst → system-architect → developer →
 |-------|-------|--------|-------|
 | Requirements | Requirements Analyst | ✅ Done | `docs/requirements/SRS.md` (FR-1…26, NFR-1…7, C-1…16, AC-1…13, OQ-1…9) |
 | Design / Tech Stack | System Architect | ✅ Done | `docs/tech-stack.md`, `docs/design/ARCHITECTURE.md`, `docs/design/sequence-diagram.md`; OQ-1…9 resolved |
-| Implementation | Developer | 🔵 In progress | Scaffold monorepo + implement services |
-| QA / Verification | QA Engineer | ⬜ Not started | |
-| Release / Packaging | Release Engineer | ⬜ Not started | |
+| Implementation | Developer | ✅ Done | 3 services built; Order(Go)/Payment(py,15 tests)/Inventory(C++,10 tests) pass. Deploy/observability configs deferred to Release. |
+| QA / Verification | QA Engineer | 🔵 In progress | Verify against SRS/AC; run full suites |
+| Release / Packaging | Release Engineer | ⬜ Not started | Compose, Helm, K8s, observability backends, CI |
 | Documentation | Technical Writer | ⬜ Not started | |
 
 ## Key design decisions (from System Architect)
@@ -29,4 +29,10 @@ New-project chain: **requirements-analyst → system-architect → developer →
 
 ## Commit log (per-stage, semver-classified)
 - Requirements stage: `d1e726d` semver(minor).
-- Design stage: pending commit.
+- Design stage: `ae93770` semver(minor).
+- Implementation stage: pending commit.
+
+## Implementation notes / carry-forward for QA & Release
+- Inventory (C++) full server target (grpc/libpqxx/opentelemetry-cpp adapters) needs a vcpkg toolchain or the Docker build to compile; only core+tests compiled locally. QA/Release should run the full vcpkg build.
+- Deploy manifests (compose/helm/k8s), observability backend configs (OTel Collector, Prometheus + alert rules, Loki, Tempo, Grafana dashboards/SLOs), and CI are the Release Engineer's scope.
+- `buf.gen.yaml` lists an optional C++ codegen path; CMake generates C++ stubs directly.
