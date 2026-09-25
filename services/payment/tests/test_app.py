@@ -8,10 +8,19 @@ from __future__ import annotations
 
 import json
 
-from helpers import METER, TRACER, FakeRepo, FakeReserver, order_created, reservation_failed
+from helpers import (
+    METER,
+    TRACER,
+    FakeRepo,
+    FakeReserver,
+    order_cancelled,
+    order_created,
+    reservation_failed,
+)
 
 from payment.app import (
     TOPIC_INVENTORY_RESV_FAILED,
+    TOPIC_ORDER_CANCELLED,
     TOPIC_ORDER_CREATED,
     TOPIC_PAYMENT_FAILED,
     TOPIC_PAYMENT_PROCESSED,
@@ -103,6 +112,21 @@ def test_compensation_refunds_processed_payment() -> None:
     assert repo.payments["saga-1"] == (10.0, "REFUNDED")
     assert repo.outbox[-1].topic == TOPIC_PAYMENT_REFUNDED
     assert repo.outbox[-1].event_type == "PaymentRefunded"
+
+
+def test_order_cancelled_without_processed_payment_emits_no_refund() -> None:
+    # order.cancelled is a compensation trigger, but when the payment stage
+    # already FAILED (or never processed) there is nothing to refund: the
+    # status='PROCESSED' guard must suppress a spurious PaymentRefunded event.
+    repo, reserver = FakeRepo(), FakeReserver()
+    processor = _make(repo, reserver)
+    repo.payments["saga-1"] = (66.06, "FAILED")
+
+    processor.handle(TOPIC_ORDER_CANCELLED, order_cancelled(saga_id="saga-1"), "")
+
+    assert repo.payments["saga-1"] == (66.06, "FAILED")  # unchanged
+    refunds = [ob for ob in repo.outbox if ob.topic == TOPIC_PAYMENT_REFUNDED]
+    assert refunds == []  # no compensation event emitted
 
 
 def test_duplicate_compensation_is_deduped() -> None:
