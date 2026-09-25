@@ -89,7 +89,7 @@ sequenceDiagram
     Order->>Kafka: publish order.cancelled
     end
 
-    Note over Client,Inventory: Rollback observable end-to-end in logs + one trace<br/>trace-to-log correlation (AC-6); no residual stock/payment (AC-5)
+    Note over Client,Inventory: Rollback observable end-to-end in logs + one trace<br/>trace-to-log correlation (AC-6), no residual stock/payment (AC-5)
 ```
 
 ### 2.1 Alternate trigger — payment-stage failure (FR-19, §10 tech-stack)
