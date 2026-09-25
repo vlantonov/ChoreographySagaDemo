@@ -73,7 +73,7 @@ flowchart TB
 | --- | --- | --- | --- | --- | --- |
 | **Order** | Go | orders, saga state | `order.created`, `order.cancelled` | `payment.processed`, `payment.failed`, `inventory.reserved`, `inventory.reservation_failed`, `payment.refunded` | gRPC/REST `CreateOrder`, `GetOrder` (inbound) |
 | **Payment** | Python | payments | `payment.processed`, `payment.failed`, `payment.refunded` | `order.created`, `inventory.reservation_failed` | gRPC client → Inventory |
-| **Inventory** | C++ | stock, reservations | `inventory.reserved`, `inventory.reservation_failed` | `payment.processed` (drives ReserveStock) | gRPC server `ReserveStock`, `ReleaseStock` (inbound) |
+| **Inventory** | C++ | stock, reservations | `inventory.reserved`, `inventory.reservation_failed`, `inventory.released` | `order.cancelled` (release compensation) | gRPC server `ReserveStock`, `ReleaseStock` (inbound) |
 
 Each service additionally owns its **outbox** and **processed_messages** tables (FR-9, FR-12).
 
@@ -101,7 +101,8 @@ flowchart LR
     relay -.-> obs
 ```
 
-- **API/Consumer adapters** — inbound gRPC handlers, Kafka consumers (manual offset commit).
+- **API/Consumer adapters** — inbound gRPC handlers, Kafka consumers (manual offset commit);
+  premature (out-of-order) events are parked and redelivered, not dropped (§5.1).
 - **Application layer** — executes the saga step and its compensation; wraps business write +
   outbox insert in one transaction (FR-9).
 - **Domain** — entity + explicit state machine (§5).
@@ -128,8 +129,8 @@ tests inject fakes for repo and Kafka without heavy mocking.
 | `quantity` | INT | |
 | `amount` | NUMERIC | forced-failure magic value `66.06` (§10 tech-stack) |
 | `status` | TEXT | saga state machine (§5) |
-| `payment_id` | UUID NULL | learned from `payment.processed` |
-| `reservation_id` | UUID NULL | learned from `inventory.reserved` |
+| `payment_id` | UUID NULL | reserved for future use — not yet populated (see §14, D4) |
+| `reservation_id` | UUID NULL | reserved for future use — not yet populated (see §14, D4) |
 | `created_at`/`updated_at` | TIMESTAMPTZ | |
 
 Plus `outbox` and `processed_messages` (schemas in tech-stack §8).
@@ -194,6 +195,36 @@ stateDiagram-v2
 
 `CONFIRMED` and `CANCELLED` are terminal (FR-6, FR-7, AC-1, AC-5).
 
+### 5.1 Out-of-Order / Premature Event Handling (D1)
+
+Topics are single-partition (tech-stack OQ-7), so ordering is guaranteed **within** a topic but
+**not across** topics. `payment.processed` and `inventory.reserved` are distinct topics published
+by two independent outbox relays (Payment's and Inventory's), so their relative arrival order at
+the Order consumer is **not** guaranteed. An `inventory.reserved` can reach Order while the order
+is still `PENDING`.
+
+Such an event is **not** a poison message and MUST NOT be dropped: committing its offset would
+strand the saga (e.g. stuck in `PAYMENT_OK`, never reaching `CONFIRMED`), violating AC-1.
+
+**Policy — park-and-retry:** a *premature* event (one whose prerequisite state has not yet been
+reached) is treated as *not-yet-applicable*. The handler returns an error so the Kafka offset is
+**not** committed; the consumer rewinds to the last committed offset and redelivers until the
+state can accept the event. The transactional `processed_messages` insert is rolled back with the
+failed attempt, so redelivery re-processes cleanly while idempotency still absorbs true
+duplicates. Because every produced event is durably queued in an outbox and is eventually
+delivered, the prerequisite always arrives and retries terminate (no infinite loop).
+
+| State | Trigger | Classification | Rationale |
+| --- | --- | --- | --- |
+| `PENDING` | `InventoryReserved` | **Premature (retry)** | awaits `PaymentProcessed` → `PAYMENT_OK` |
+| `PENDING` | `PaymentRefunded` | **Premature (retry)** | awaits the `PaymentProcessed`→`InventoryReservationFailed` chain |
+| `PAYMENT_OK` | `PaymentRefunded` | **Premature (retry)** | awaits `InventoryReservationFailed` → `COMPENSATING` |
+| `PAYMENT_OK` | `PaymentFailed` | Invalid (drop) | contradictory — payment cannot both succeed and fail |
+| `COMPENSATING` / terminal | contradictory triggers | Invalid / idempotent no-op | prerequisite can never arrive, or already terminal |
+
+Only transitions whose prerequisite events are guaranteed to arrive are retryable; genuinely
+contradictory transitions remain invalid (dropped) so they cannot spin forever.
+
 ---
 
 ## 6. Choreography Event Flow — Happy Path (FR-5, FR-6, AC-1)
@@ -202,9 +233,9 @@ stateDiagram-v2
    relay publishes `order.created`.
 2. Payment consumes `order.created`: charges (simulated), persists `payments(PROCESSED)` +
    outbox `PaymentProcessed` → publishes `payment.processed`.
-3. Inventory consumes `payment.processed` → **but the actual reservation is the synchronous
-   gRPC `ReserveStock` call** (see §7). On success persists `reservations(RESERVED)` + outbox
-   `InventoryReserved` → publishes `inventory.reserved`.
+3. After a successful charge, Payment makes the synchronous gRPC `Inventory.ReserveStock` call
+   (see §7); **Inventory does not consume `payment.processed`**. On success Inventory persists
+   `reservations(RESERVED)` + outbox `InventoryReserved` → publishes `inventory.reserved`.
 4. Order consumes `inventory.reserved` → `orders.status = CONFIRMED` (terminal).
 
 ## 7. gRPC Call Placement (FR-15, FR-16, C-10)
@@ -236,8 +267,10 @@ Triggered by `payment.failed` (payment-stage failure) or `inventory.reservation_
   (`payments.status=REFUNDED`) + outbox `PaymentRefunded` → `payment.refunded`.
 - Order consumes `payment.refunded` (or `payment.failed`) → `orders.status = CANCELLED`,
   outbox `OrderCancelled` → `order.cancelled`.
-- If stock was reserved before a later failure, Inventory `ReleaseStock` restores it
-  (`reservations.status=RELEASED`), returning to a no-residue consistent state (FR-21, AC-5).
+- If stock was reserved before a later failure, Inventory consumes `order.cancelled` and releases
+  it (`reservations.status=RELEASED`), emitting `inventory.released`, returning to a no-residue
+  consistent state (FR-21, AC-5). The gRPC `ReleaseStock` RPC provides the same operation for a
+  synchronous caller, but the **active** compensation path is the `order.cancelled` consumer.
 
 Rollback is observable in logs + a single trace (FR-20, AC-6) because every step carries the
 `sagaId` and W3C trace context (tech-stack §9.2).
@@ -249,12 +282,13 @@ Rollback is observable in logs + a single trace (FR-20, AC-6) because every step
 | Topic | Produced by | Consumed by | Triggers |
 | --- | --- | --- | --- |
 | `order.created` | Order | Payment | attempt payment |
-| `payment.processed` | Payment | Inventory, Order | Inventory: ReserveStock; Order: → PAYMENT_OK |
+| `payment.processed` | Payment | Order | Order → PAYMENT_OK (Inventory reservation is the sync gRPC leg, §7) |
 | `payment.failed` | Payment | Order | Order → CANCELLED |
 | `inventory.reserved` | Inventory | Order | Order → CONFIRMED |
 | `inventory.reservation_failed` | Inventory | Payment, Order | Payment: refund; Order → COMPENSATING |
 | `payment.refunded` | Payment | Order | Order → CANCELLED |
-| `order.cancelled` | Order | (terminal / observability) | saga end |
+| `order.cancelled` | Order | Inventory (release compensation) | Inventory releases reserved stock → `inventory.released` |
+| `inventory.released` | Inventory | (terminal / observability) | stock restored after compensation; saga end |
 
 ---
 
@@ -336,3 +370,69 @@ No new requirements were invented. One clarification worth noting (non-blocking)
 `InventoryReservationFailed` but the reverse-compensation also needs an explicit
 `InventoryReleased`/`ReleaseStock` action — captured here as the gRPC `ReleaseStock` +
 `reservations.status=RELEASED` (consistent with FR-3). No scope expansion.
+
+---
+
+## 14. QA Defect Resolutions (Architect rulings)
+
+Rulings on the defects raised in `docs/testing/choreography-saga-test-report.md` §5.
+
+| ID | Sev | Ruling | Action owner |
+| --- | --- | --- | --- |
+| **D1** | Medium | **FIX** — cross-topic reordering is genuinely possible (single-partition guarantees per-topic ordering only, §5.1). Adopt **park-and-retry** for premature events. | Developer (code) |
+| **D2** | Low | **FIX (remove)** — Payment consuming `order.cancelled` is **not** an approved design addition; `order.cancelled` is a terminal event (§9). Payment refunds solely off `inventory.reservation_failed`. Align Payment's consumed topics with §2. | Developer (code) |
+| **D3** | Low (doc) | **FIXED (this document)** — §2/§6/§8/§9 now match the implemented sync-gRPC design: Inventory does not consume `payment.processed`; it consumes `order.cancelled` and emits `inventory.released`. | Architect (done) |
+| **D4** | Info | **KEEP as reserved** — `orders.payment_id`/`reservation_id` are retained for a future richer `GetOrder`; documented as reserved in §4.1. No change required. | None (documented) |
+
+### D1 change spec for the Developer
+
+Approach: **park-and-retry** — a premature event is not dropped; the handler declines to commit
+the offset and the consumer rewinds and redelivers until the prerequisite state is reached.
+Chosen over persist-and-reconcile or in-memory buffering because it reuses the existing
+at-least-once + `processed_messages` idempotency machinery (no new tables or saga buffer),
+keeps the state machine pure, and relies on the outbox's durability guarantee that every
+prerequisite event is eventually delivered (so retries terminate).
+
+1. `services/order/internal/domain/order.go`
+   - Add `var ErrPrematureEvent = errors.New("premature saga event; prerequisite not yet applied")`.
+   - In `Apply`, return `ErrPrematureEvent` (instead of falling through to `ErrInvalidTransition`)
+     for exactly these three cases: `PENDING`+`TriggerInventoryReserved`,
+     `PENDING`+`TriggerPaymentRefunded`, `PAYMENT_OK`+`TriggerPaymentRefunded`.
+   - All other undefined transitions keep returning `ErrInvalidTransition`.
+
+2. `services/order/internal/app/service.go` `HandleEvent`
+   - The `EventTxFunc` already propagates the `Apply` error; `store.HandleEvent`'s `pgx.BeginFunc`
+     rolls the transaction back on error, which also rolls back the `processed_messages` insert
+     (so the redelivery re-processes). Add an explicit branch: if
+     `errors.Is(err, domain.ErrPrematureEvent)` → log at info ("premature event; awaiting
+     prerequisite, will retry") and **return the error** (do not `return nil`) so the offset is
+     not committed. Keep `ErrInvalidTransition` → log + `return nil` (drop) as today.
+
+3. `services/order/internal/kafkax/kafka.go` `Consumer.Run`
+   - Non-committing alone does not redeliver **in-process** with franz-go (the client keeps its
+     in-memory fetch position). On a handler error, before re-polling, **rewind** each partition
+     in the current fetch to the offset of its first record via `cl.SetOffsets(...)` (capture
+     first offset per partition with `fetches.EachPartition` before dispatch), then apply a short
+     backoff (e.g. `time.After(500ms)`, ctx-aware) to avoid a busy-spin while awaiting the
+     prerequisite. This also improves transient DB/error handling. Re-processing of already-applied
+     records in the rewound batch is absorbed by `processed_messages`.
+
+**Required new unit tests** (domain layer, where the logic lives — consistent with the existing
+test strategy; consumer-level rewind is verified in the post-Release live-Kafka regression):
+
+- `TestApply_PrematureInventoryReserved` — `Apply(StatusPending, TriggerInventoryReserved)`
+  returns `ErrPrematureEvent` (not `ErrInvalidTransition`) and leaves state unchanged.
+- `TestApply_PrematurePaymentRefunded` — `Apply(StatusPending, TriggerPaymentRefunded)` and
+  `Apply(StatusPaymentOK, TriggerPaymentRefunded)` both return `ErrPrematureEvent`.
+- `TestApply_ReorderThenPrerequisiteReachesConfirmed` — simulate the D1 reorder: from `PENDING`,
+  `InventoryReserved` → `ErrPrematureEvent` (parked); then `PaymentProcessed` → `PAYMENT_OK`;
+  then the redelivered `InventoryReserved` → `CONFIRMED` (terminal).
+- Regression guard: keep `TestApply_InvalidTransition` (`PAYMENT_OK`+`PaymentFailed` →
+  `ErrInvalidTransition`) to prove genuinely-invalid transitions are still dropped, not retried.
+
+### D2 change spec for the Developer
+
+- `services/payment/src/payment/app.py`: remove `TOPIC_ORDER_CANCELLED` from
+  `consumed_topics()` and from the compensation route in `handle` (Payment refunds solely on
+  `inventory.reservation_failed`). Update the corresponding test/helper so the suite still covers
+  the refund compensation via `inventory.reservation_failed`.

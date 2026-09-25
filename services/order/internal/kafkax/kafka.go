@@ -6,11 +6,16 @@ package kafkax
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
 const traceparentHeader = "traceparent"
+
+// retryBackoff paces re-polls after a handler error (e.g. a parked premature
+// event) so the consumer awaits the prerequisite without busy-spinning.
+const retryBackoff = 500 * time.Millisecond
 
 // Producer publishes outbox rows to Kafka and satisfies outbox.Publisher.
 type Producer struct{ cl *kgo.Client }
@@ -66,7 +71,10 @@ func NewConsumer(brokers, group string, topics []string) (*Consumer, error) {
 }
 
 // Run polls and dispatches records until ctx is cancelled, committing offsets
-// only after a handler succeeds (at-least-once).
+// only after a handler succeeds (at-least-once). On a handler error the current
+// fetch is rewound to each partition's first record and re-polled after a short
+// backoff, so a parked premature event is redelivered in-process until its
+// prerequisite arrives (ARCHITECTURE §5.1); duplicates are absorbed downstream.
 func (c *Consumer) Run(ctx context.Context, h Handler) {
 	for {
 		if ctx.Err() != nil {
@@ -76,6 +84,20 @@ func (c *Consumer) Run(ctx context.Context, h Handler) {
 		if fetches.IsClientClosed() {
 			return
 		}
+
+		// Capture each partition's first fetched offset so we can rewind on error.
+		rewind := make(map[string]map[int32]kgo.EpochOffset)
+		fetches.EachPartition(func(ftp kgo.FetchTopicPartition) {
+			if len(ftp.Records) == 0 {
+				return
+			}
+			r := ftp.Records[0]
+			if rewind[ftp.Topic] == nil {
+				rewind[ftp.Topic] = make(map[int32]kgo.EpochOffset)
+			}
+			rewind[ftp.Topic][ftp.Partition] = kgo.EpochOffset{Epoch: r.LeaderEpoch, Offset: r.Offset}
+		})
+
 		var failed bool
 		fetches.EachRecord(func(r *kgo.Record) {
 			if failed {
@@ -86,10 +108,18 @@ func (c *Consumer) Run(ctx context.Context, h Handler) {
 				failed = true // stop; do not commit so redelivery occurs
 			}
 		})
-		if !failed {
-			if err := c.cl.CommitUncommittedOffsets(ctx); err != nil {
+		if failed {
+			// Rewind the in-memory fetch position and back off before re-polling.
+			c.cl.SetOffsets(rewind)
+			select {
+			case <-ctx.Done():
 				return
+			case <-time.After(retryBackoff):
 			}
+			continue
+		}
+		if err := c.cl.CommitUncommittedOffsets(ctx); err != nil {
+			return
 		}
 	}
 }

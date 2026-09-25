@@ -81,11 +81,3 @@ def reservation_failed(saga_id: str = "saga-1", amount: float = 10.0) -> bytes:
         saga_id=saga_id,
         data={"orderId": saga_id, "sagaId": saga_id, "amount": amount},
     ).to_json()
-
-
-def order_cancelled(saga_id: str = "saga-1", amount: float = 10.0) -> bytes:
-    return Envelope(
-        event_type="OrderCancelled",
-        saga_id=saga_id,
-        data={"orderId": saga_id, "sagaId": saga_id, "amount": amount},
-    ).to_json()

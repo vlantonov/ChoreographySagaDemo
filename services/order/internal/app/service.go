@@ -21,15 +21,15 @@ import (
 
 // Kafka topics (tech-stack §5.3, ARCHITECTURE §9).
 const (
-	TopicOrderCreated       = "order.created"
-	TopicOrderCancelled     = "order.cancelled"
-	TopicPaymentProcessed   = "payment.processed"
-	TopicPaymentFailed      = "payment.failed"
-	TopicInventoryReserved  = "inventory.reserved"
-	TopicInventoryResvFail  = "inventory.reservation_failed"
-	TopicPaymentRefunded    = "payment.refunded"
-	aggregateType           = "order"
-	consumerName            = "order-service"
+	TopicOrderCreated      = "order.created"
+	TopicOrderCancelled    = "order.cancelled"
+	TopicPaymentProcessed  = "payment.processed"
+	TopicPaymentFailed     = "payment.failed"
+	TopicInventoryReserved = "inventory.reserved"
+	TopicInventoryResvFail = "inventory.reservation_failed"
+	TopicPaymentRefunded   = "payment.refunded"
+	aggregateType          = "order"
+	consumerName           = "order-service"
 )
 
 // ConsumedTopics are the topics the Order service subscribes to (ARCHITECTURE §2).
@@ -164,6 +164,14 @@ func (s *Service) HandleEvent(ctx context.Context, topic string, value []byte, t
 		if errors.Is(err, domain.ErrInvalidTransition) {
 			s.log.WarnContext(ctx, "invalid transition; skipping", "saga_id", env.SagaID, "topic", topic)
 			return nil
+		}
+		if errors.Is(err, domain.ErrPrematureEvent) {
+			// Park-and-retry: the tx (incl. processed_messages insert) rolled back,
+			// so do not commit the offset — redelivery re-applies it once the
+			// prerequisite state is reached (ARCHITECTURE §5.1).
+			s.log.InfoContext(ctx, "premature event; awaiting prerequisite, will retry",
+				"saga_id", env.SagaID, "topic", topic)
+			return err
 		}
 		return fmt.Errorf("handle %s: %w", topic, err)
 	}

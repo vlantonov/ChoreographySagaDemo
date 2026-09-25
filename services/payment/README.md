@@ -10,7 +10,7 @@ compensation — all through a transactional outbox and an idempotent consumer
 
 | Concern | Detail |
 | --- | --- |
-| Consumes | `order.created`, `inventory.reservation_failed`, `order.cancelled` |
+| Consumes | `order.created`, `inventory.reservation_failed` |
 | Publishes | `payment.processed`, `payment.failed`, `payment.refunded` |
 | Sync API | gRPC **client** → `Inventory.ReserveStock` |
 | Owns | `payments`, `outbox`, `processed_messages` (payments-db) |
@@ -22,7 +22,7 @@ compensation — all through a transactional outbox and an idempotent consumer
    - Approved → persist `payments(PROCESSED)` + outbox `PaymentProcessed` in one
      transaction, then make the synchronous `ReserveStock` gRPC call.
    - Declined → persist `payments(FAILED)` + outbox `PaymentFailed`.
-2. `inventory.reservation_failed` / `order.cancelled` → refund a processed
+2. `inventory.reservation_failed` → refund a processed
    payment: `payments(REFUNDED)` + outbox `PaymentRefunded`.
 
 Idempotency: the payment write is deduped on `saga_id`; compensation is deduped

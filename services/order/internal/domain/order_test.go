@@ -57,3 +57,39 @@ func TestApply_InvalidTransition(t *testing.T) {
 		t.Fatalf("expected ErrInvalidTransition, got %v", err)
 	}
 }
+
+func TestApply_PrematureInventoryReserved(t *testing.T) {
+	res, err := Apply(StatusPending, TriggerInventoryReserved)
+	if err != ErrPrematureEvent {
+		t.Fatalf("expected ErrPrematureEvent, got %v", err)
+	}
+	if res.Next != StatusPending || res.Changed {
+		t.Fatalf("state must be unchanged, got %+v", res)
+	}
+}
+
+func TestApply_PrematurePaymentRefunded(t *testing.T) {
+	if res, err := Apply(StatusPending, TriggerPaymentRefunded); err != ErrPrematureEvent || res.Changed {
+		t.Fatalf("pending+PaymentRefunded => %+v err=%v (want ErrPrematureEvent, unchanged)", res, err)
+	}
+	if res, err := Apply(StatusPaymentOK, TriggerPaymentRefunded); err != ErrPrematureEvent || res.Changed {
+		t.Fatalf("paymentOK+PaymentRefunded => %+v err=%v (want ErrPrematureEvent, unchanged)", res, err)
+	}
+}
+
+func TestApply_ReorderThenPrerequisiteReachesConfirmed(t *testing.T) {
+	// D1 reorder: InventoryReserved arrives while still PENDING and is parked.
+	if _, err := Apply(StatusPending, TriggerInventoryReserved); err != ErrPrematureEvent {
+		t.Fatalf("premature InventoryReserved should be parked, got err=%v", err)
+	}
+	// PaymentProcessed advances the prerequisite state.
+	res, err := Apply(StatusPending, TriggerPaymentProcessed)
+	if err != nil || res.Next != StatusPaymentOK || !res.Changed {
+		t.Fatalf("pending+PaymentProcessed => %+v err=%v", res, err)
+	}
+	// Redelivered InventoryReserved now confirms the order (terminal).
+	res, err = Apply(res.Next, TriggerInventoryReserved)
+	if err != nil || res.Next != StatusConfirmed || !res.Changed || !res.Next.IsTerminal() {
+		t.Fatalf("redelivered InventoryReserved => %+v err=%v (want CONFIRMED)", res, err)
+	}
+}

@@ -28,7 +28,7 @@
 | OQ-4 | Kafka event schema/versioning | **JSON** envelope with `schemaVersion`, CloudEvents-style; no registry | §5 |
 | OQ-5 | Forced-failure trigger | Magic order amount **`66.06`** OR `FORCE_PAYMENT_FAILURE=true` env flag | §10 |
 | OQ-6 | Order-trigger interface | **gRPC + REST (grpc-gateway)** `CreateOrder` on Order service | §11 |
-| OQ-7 | Demo scale | **Single replica per service**, single-partition topics (ordering-safe) | §7 |
+| OQ-7 | Demo scale | **Single replica per service**, single-partition topics (per-topic ordering; cross-topic order not guaranteed — see ARCHITECTURE §5.1) | §7 |
 | OQ-8 | Is `docs/tech-stack.md` required | **Yes** — this document | — |
 | OQ-9 | Licensing constraints | All chosen components are permissively licensed (Apache-2.0/MIT/BSD/PostgreSQL) — compatible with project MIT | §13 |
 
@@ -136,7 +136,7 @@ synchronous gRPC contract (§6).
 | Topic | Producer | Consumers | Purpose |
 | --- | --- | --- | --- |
 | `order.created` | Order | Payment | Forward saga step 1 (FR-5) |
-| `payment.processed` | Payment | Inventory, Order | Payment success (FR-5) |
+| `payment.processed` | Payment | Order | Payment success (FR-5); Inventory reservation is the sync gRPC leg (§6) |
 | `payment.failed` | Payment | Order | Payment failure → compensation trigger (FR-7) |
 | `inventory.reserved` | Inventory | Order | Inventory success → order CONFIRMED (FR-6) |
 | `inventory.reservation_failed` | Inventory | Order, Payment | Inventory failure → compensation (FR-7) |
@@ -217,6 +217,9 @@ message GetOrderResponse    { string order_id = 1; string status = 2; string sku
 - **One replica per service**, **one partition per topic**. Single partition guarantees
   per-topic ordering without a partition-key strategy, which keeps the choreography easy to
   reason about for the demo.
+- Ordering across **different** topics is still not guaranteed (independent outbox relays); the
+  Order saga consumer handles legitimately-early events with park-and-retry, not by dropping
+  them (ARCHITECTURE §5.1, defect D1).
 - Idempotency (§8) is still implemented and demonstrated (AC-9) so the design remains correct
   if scaled out later; the doc notes multi-partition/multi-replica as future work (OOS-5).
 

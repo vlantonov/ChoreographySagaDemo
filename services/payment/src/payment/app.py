@@ -23,10 +23,11 @@ from payment.obs import context_from_traceparent, inject_traceparent
 
 logger = logging.getLogger("payment.app")
 
-# Consumed topics (ARCHITECTURE §2, §9).
+# Consumed topics (ARCHITECTURE §2, §9). Payment refunds solely off
+# inventory.reservation_failed; order.cancelled is a terminal event it does not
+# consume (ARCHITECTURE §9, §14 D2).
 TOPIC_ORDER_CREATED = "order.created"
 TOPIC_INVENTORY_RESV_FAILED = "inventory.reservation_failed"
-TOPIC_ORDER_CANCELLED = "order.cancelled"
 
 # Produced topics (tech-stack §5.3).
 TOPIC_PAYMENT_PROCESSED = "payment.processed"
@@ -76,7 +77,7 @@ class PaymentProcessor:
 
     @staticmethod
     def consumed_topics() -> list[str]:
-        return [TOPIC_ORDER_CREATED, TOPIC_INVENTORY_RESV_FAILED, TOPIC_ORDER_CANCELLED]
+        return [TOPIC_ORDER_CREATED, TOPIC_INVENTORY_RESV_FAILED]
 
     def handle(self, topic: str, value: bytes, traceparent: str) -> None:
         """Kafka handler entry point (matches ``kafka_io.Handler``).
@@ -91,7 +92,7 @@ class PaymentProcessor:
             out_traceparent = inject_traceparent()
             if topic == TOPIC_ORDER_CREATED:
                 self._handle_order_created(env, out_traceparent)
-            elif topic in (TOPIC_INVENTORY_RESV_FAILED, TOPIC_ORDER_CANCELLED):
+            elif topic == TOPIC_INVENTORY_RESV_FAILED:
                 self._handle_compensation(env, out_traceparent)
             else:
                 logger.warning("ignoring unexpected topic %s", topic)

@@ -40,6 +40,12 @@ const EventOrderCancelled = "OrderCancelled"
 // is not a benign duplicate. Callers treat it as a poison message.
 var ErrInvalidTransition = errors.New("invalid saga transition")
 
+// ErrPrematureEvent indicates a plausible saga event that arrived before its
+// prerequisite state was reached (cross-topic reordering, ARCHITECTURE §5.1).
+// Callers park-and-retry: the offset is not committed so redelivery re-applies
+// it once the prerequisite has been processed.
+var ErrPrematureEvent = errors.New("premature saga event; prerequisite not yet applied")
+
 // Result describes the outcome of applying a trigger to a status.
 type Result struct {
 	Next    Status
@@ -62,6 +68,12 @@ func Apply(cur Status, t Trigger) (Result, error) {
 		case TriggerInventoryReservationFail:
 			// No payment succeeded yet; cancel directly.
 			return Result{Next: StatusCancelled, Changed: true, Emit: []string{EventOrderCancelled}}, nil
+		case TriggerInventoryReserved:
+			// Premature: awaits PaymentProcessed -> PAYMENT_OK (ARCHITECTURE §5.1).
+			return Result{Next: cur, Changed: false}, ErrPrematureEvent
+		case TriggerPaymentRefunded:
+			// Premature: awaits the PaymentProcessed -> InventoryReservationFailed chain.
+			return Result{Next: cur, Changed: false}, ErrPrematureEvent
 		}
 	case StatusPaymentOK:
 		switch t {
@@ -72,6 +84,9 @@ func Apply(cur Status, t Trigger) (Result, error) {
 			return Result{Next: StatusCompensating, Changed: true}, nil
 		case TriggerPaymentProcessed:
 			return Result{Next: StatusPaymentOK, Changed: false}, nil // duplicate
+		case TriggerPaymentRefunded:
+			// Premature: awaits InventoryReservationFailed -> COMPENSATING (ARCHITECTURE §5.1).
+			return Result{Next: cur, Changed: false}, ErrPrematureEvent
 		}
 	case StatusCompensating:
 		switch t {
