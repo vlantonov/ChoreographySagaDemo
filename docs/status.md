@@ -9,14 +9,24 @@ New-project chain: **requirements-analyst → system-architect → developer →
 | Stage | Owner | Status | Notes |
 |-------|-------|--------|-------|
 | Requirements | Requirements Analyst | ✅ Done | `docs/requirements/SRS.md` (FR-1…26, NFR-1…7, C-1…16, AC-1…13, OQ-1…9) |
-| Design / Tech Stack | System Architect | ⬜ Not started | Must resolve OQ-1…9 and create `docs/tech-stack.md` |
-| Implementation | Developer | ⬜ Not started | |
+| Design / Tech Stack | System Architect | ✅ Done | `docs/tech-stack.md`, `docs/design/ARCHITECTURE.md`, `docs/design/sequence-diagram.md`; OQ-1…9 resolved |
+| Implementation | Developer | 🔵 In progress | Scaffold monorepo + implement services |
 | QA / Verification | QA Engineer | ⬜ Not started | |
 | Release / Packaging | Release Engineer | ⬜ Not started | |
 | Documentation | Technical Writer | ⬜ Not started | |
 
+## Key design decisions (from System Architect)
+- Language mapping: **Order=Go 1.23, Payment=Python 3.12, Inventory=C++20**.
+- Sync gRPC leg: `Inventory.ReserveStock` (called by Payment); `ReleaseStock` for compensation.
+- SQL: PostgreSQL, database-per-service; polling outbox relay (`FOR UPDATE SKIP LOCKED`) + `processed_messages` idempotency table.
+- Kafka topics: `order.created`, `payment.processed`, `payment.failed`, `inventory.reserved`, `inventory.reservation_failed`, `payment.refunded`, `order.cancelled`.
+- Forced failure: amount `66.06` / `FORCE_PAYMENT_FAILURE=true` (payment stage); SKU `SKU-DEADBEEF` (inventory stage, full reverse chain).
+- Order trigger: gRPC `CreateOrder` + REST via grpc-gateway; demo scripts.
+- Observability: OTel → Collector → Prometheus/Loki/Tempo → Grafana; trace_id/span_id in structured logs.
+
 ## Open questions carried forward
-- OQ-1…9 from the SRS — most critical: language-to-service mapping (C++/Python/Go), SQL engine choice, concrete SLO/alert thresholds, Kafka event schema/versioning, forced-failure trigger mechanism, order-trigger interface. Owned by System Architect.
+- All OQ-1…9 resolved by the System Architect. Non-blocking note: compensation `ReleaseStock`/`InventoryReleased` captured consistent with FR-3 (no scope expansion).
 
 ## Commit log (per-stage, semver-classified)
-- Requirements stage: pending commit.
+- Requirements stage: `d1e726d` semver(minor).
+- Design stage: pending commit.
