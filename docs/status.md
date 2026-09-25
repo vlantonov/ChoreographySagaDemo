@@ -13,7 +13,7 @@ New-project chain: **requirements-analyst → system-architect → developer →
 | Implementation | Developer | ✅ Done | 3 services built; Order(Go)/Payment(py,15 tests)/Inventory(C++,10 tests) pass. Deploy/observability configs deferred to Release. |
 | QA / Verification | QA Engineer | ✅ Conditional-pass | Go/Py/C++ suites pass; D1/D2 fixed & re-verified; D3 doc fixed; D4 accepted. Live regression after Release. |
 | Release / Packaging | Release Engineer | ✅ Done (metrics loop next) | Compose+Helm+K8s, OTel/Prom/Loki/Tempo/Grafana, alerts, SLO+trace-log dashboards, CI. Env footgun fixed; latency-SLO metrics gap flagged. |
-| Documentation | Technical Writer | ⬜ Not started | |
+| Documentation | Technical Writer | ✅ Done | Top-level `README.md` (portfolio overview, both sequence diagrams, quickstart, forced-failure demo, observability, deploy/build/test) + `CHANGELOG.md` (Keep a Changelog, `[Unreleased]` for PM to finalize). Doc drift flagged (see below). |
 
 ## Key design decisions (from System Architect)
 - Language mapping: **Order=Go 1.23, Payment=Python 3.12, Inventory=C++20**.
@@ -34,7 +34,14 @@ New-project chain: **requirements-analyst → system-architect → developer →
 - QA stage: `2c69aa3` semver(patch).
 - D1/D2/D3 remediation loop (Architect+Developer): `9af2d12` semver(patch).
 - Release stage (packaging + observability + CI): `c5720d4` semver(minor).
-- SLO metrics loop (Developer metrics + Release alerts/panels): pending commit.
+- SLO metrics loop (Developer metrics + Release alerts/panels): `91c9c1a` semver(minor).
+- Documentation stage (README/CHANGELOG + demo scripts + go.mod fix): pending commit.
+- Version publish: pending.
+
+## Documentation-stage doc drift (resolved)
+- Demo scripts `scripts/run-demo.sh` and `scripts/force-failure.sh` now shipped (target the
+  Order REST gateway on :8080; drive happy-path and both forced-failure/compensation scenarios).
+- `services/order/go.mod` raised to `go 1.23` to match tech-stack/CI; README updated.
 
 ## Carry-forward (latency-SLO gap)
 - RESOLVED: services now emit `saga_duration_seconds`, `outbox_pending`, `outbox_publish_lag_seconds` (Order/Payment/Inventory) and `reserve_stock_server_duration_seconds` (Inventory); latency/lag alerts + dashboard panels added. C++ metric code verifies on the vcpkg/Docker build.
