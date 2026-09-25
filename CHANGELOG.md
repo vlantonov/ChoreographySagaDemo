@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — initial release
+## [0.1.0] — 2026-09-26
 
 Initial, feature-complete release of the Choreography Saga demo: a polyglot
 distributed-transaction showcase implementing the saga pattern with compensating
@@ -60,4 +60,4 @@ transactions across three services and databases.
 - **D2 — refund trigger:** Payment now refunds only on `inventory.reservation_failed`; the
   redundant `order.cancelled` refund path was removed so a payment is not refunded twice.
 
-[Unreleased]: https://github.com/vladiant/ChoreographySagaDemo
+[0.1.0]: https://github.com/vladiant/ChoreographySagaDemo/releases/tag/v0.1.0

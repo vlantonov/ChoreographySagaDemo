@@ -36,7 +36,7 @@ New-project chain: **requirements-analyst → system-architect → developer →
 - Release stage (packaging + observability + CI): `c5720d4` semver(minor).
 - SLO metrics loop (Developer metrics + Release alerts/panels): `91c9c1a` semver(minor).
 - Documentation stage (README/CHANGELOG + demo scripts + go.mod fix): pending commit.
-- Version publish: pending.
+- Version publish: v0.1.0 (initial release, MINOR).
 
 ## Documentation-stage doc drift (resolved)
 - Demo scripts `scripts/run-demo.sh` and `scripts/force-failure.sh` now shipped (target the
