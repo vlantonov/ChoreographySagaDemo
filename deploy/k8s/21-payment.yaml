@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment
+  namespace: choreography-saga
+  labels: { app.kubernetes.io/name: payment, app.kubernetes.io/part-of: choreography-saga }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: payment }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: payment }
+    spec:
+      containers:
+        - name: payment
+          image: choreography-saga/payment:0.1.0
+          env:
+            - name: PAYMENT_DATABASE_URL
+              valueFrom: { secretKeyRef: { name: payment-db, key: url } }
+            - name: KAFKA_BROKERS
+              valueFrom: { configMapKeyRef: { name: saga-shared, key: KAFKA_BROKERS } }
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              valueFrom: { configMapKeyRef: { name: saga-shared, key: OTLP_ENDPOINT } }
+            - { name: OTEL_SERVICE_NAME, value: payment }
+            - { name: KAFKA_CONSUMER_GROUP, value: payment-service }
+            - { name: INVENTORY_GRPC_TARGET, value: "inventory:50052" }
+            # Forced-failure trigger (tech-stack §10). Also works via amount 66.06
+            # or SKU-DEADBEEF without flipping this flag.
+            - { name: FORCE_PAYMENT_FAILURE, value: "false" }
+          resources:
+            requests: { cpu: 50m, memory: 96Mi }
+            limits: { cpu: 500m, memory: 384Mi }

@@ -1,0 +1,73 @@
+# Values for the choreography-saga chart.
+#
+# Kafka / PostgreSQL / observability are treated as EXTERNAL dependencies:
+# set their endpoints under `global`. Defaults point at in-namespace service
+# DNS names that match the plain-k8s manifests / a typical Compose-on-k8s setup.
+
+global:
+  imageRegistry: ""            # e.g. ghcr.io/vladiant/ — prefix for all images
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets: []
+
+  # Shared infrastructure endpoints (external to this chart).
+  kafkaBrokers: "kafka:9092"
+  otlpEndpoint: "http://otel-collector:4317"          # Python/C++ form (with scheme)
+  otlpEndpointNoScheme: "otel-collector:4317"          # Go form (host:port)
+
+# ---- Order service (Go) -----------------------------------------------------
+order:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: choreography-saga/order
+    tag: "0.1.0"
+  service:
+    grpcPort: 50051
+    httpPort: 8080
+  database:
+    # Reference an external Postgres; secret holds the full DSN.
+    urlSecretName: order-db
+    urlSecretKey: url
+    url: "postgres://order:order@orders-db:5432/orders?sslmode=disable"
+  consumerGroup: order-service
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+
+# ---- Payment service (Python) ----------------------------------------------
+payment:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: choreography-saga/payment
+    tag: "0.1.0"
+  database:
+    urlSecretName: payment-db
+    urlSecretKey: url
+    url: "postgresql+psycopg://payment:payment@payments-db:5432/payments"
+  consumerGroup: payment-service
+  inventoryGrpcTarget: ""      # empty -> defaults to <release>-inventory:<grpcPort>
+  # Forced-failure trigger (tech-stack §10, FR-19). Magic amount 66.06 and
+  # SKU-DEADBEEF also work without this flag.
+  forcePaymentFailure: false
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits: { cpu: 500m, memory: 384Mi }
+
+# ---- Inventory service (C++) -----------------------------------------------
+inventory:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: choreography-saga/inventory
+    tag: "0.1.0"
+  service:
+    grpcPort: 50052
+  database:
+    urlSecretName: inventory-db
+    urlSecretKey: url
+    url: "postgresql://inventory:inventory@inventory-db:5432/inventory"
+  consumerGroup: inventory-service
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }

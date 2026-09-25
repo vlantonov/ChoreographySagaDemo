@@ -1,0 +1,23 @@
+Choreography Saga services deployed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+Deployed services:
+{{- if .Values.order.enabled }}
+  - order      (gRPC :{{ .Values.order.service.grpcPort }}, REST :{{ .Values.order.service.httpPort }})
+{{- end }}
+{{- if .Values.payment.enabled }}
+  - payment    (Kafka consumer + Inventory gRPC client)
+{{- end }}
+{{- if .Values.inventory.enabled }}
+  - inventory  (gRPC :{{ .Values.inventory.service.grpcPort }})
+{{- end }}
+
+Reminder — this chart deploys ONLY the three services. Kafka, PostgreSQL and the
+observability stack are external dependencies configured via values.global:
+  kafkaBrokers = {{ .Values.global.kafkaBrokers }}
+  otlpEndpoint = {{ .Values.global.otlpEndpoint }}
+
+Trigger a saga (from within the cluster or via port-forward):
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-order 8080:{{ .Values.order.service.httpPort }}
+  curl -s localhost:8080/v1/orders -d '{"sku":"SKU-1","quantity":1,"amount":10.0,"customerId":"c1"}'
+
+Forced-failure demo: send amount 66.06, or set payment.forcePaymentFailure=true.

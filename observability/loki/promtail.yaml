@@ -1,0 +1,39 @@
+# Promtail — ships Docker container stdout (structured JSON logs) to Loki.
+# The services log JSON including trace_id/span_id; the raw line is forwarded so
+# Grafana's Loki derived fields can extract trace_id and link to Tempo (§9.2).
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+    relabel_configs:
+      # Only collect logs from this project's compose stack.
+      - source_labels: ["__meta_docker_container_label_com_docker_compose_project"]
+        regex: choreography-saga
+        action: keep
+      - source_labels: ["__meta_docker_container_label_com_docker_compose_service"]
+        target_label: service
+      - source_labels: ["__meta_docker_container_name"]
+        regex: "/(.*)"
+        target_label: container
+    pipeline_stages:
+      # Parse the JSON log line and surface trace_id/span_id as labels for fast
+      # filtering; the full line is retained for derived-field correlation.
+      - json:
+          expressions:
+            trace_id: trace_id
+            span_id: span_id
+            level: level
+      - labels:
+          level:

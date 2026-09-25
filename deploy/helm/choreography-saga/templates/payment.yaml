@@ -1,0 +1,61 @@
+{{- if .Values.payment.enabled -}}
+{{- $c := .Values.payment -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}-payment-db
+  labels:
+    app.kubernetes.io/name: payment
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: choreography-saga
+type: Opaque
+stringData:
+  url: {{ $c.database.url | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-payment
+  labels:
+    app.kubernetes.io/name: payment
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: choreography-saga
+spec:
+  replicas: {{ $c.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: payment
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: payment
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: payment
+          image: {{ include "cs.image" (dict "root" $ "image" $c.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            - name: PAYMENT_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $c.database.urlSecretName | default (printf "%s-payment-db" .Release.Name) }}
+                  key: {{ $c.database.urlSecretKey }}
+            - name: KAFKA_BROKERS
+              value: {{ .Values.global.kafkaBrokers | quote }}
+            - name: KAFKA_CONSUMER_GROUP
+              value: {{ $c.consumerGroup | quote }}
+            - name: INVENTORY_GRPC_TARGET
+              value: {{ $c.inventoryGrpcTarget | default (printf "%s-inventory:%v" .Release.Name .Values.inventory.service.grpcPort) | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: payment
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.global.otlpEndpoint | quote }}
+            - name: FORCE_PAYMENT_FAILURE
+              value: {{ $c.forcePaymentFailure | quote }}
+          resources: {{ toYaml $c.resources | nindent 12 }}
+{{- end }}

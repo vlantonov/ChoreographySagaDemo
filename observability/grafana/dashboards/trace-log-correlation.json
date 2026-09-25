@@ -1,0 +1,65 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 0,
+  "title": "Trace & Log Correlation",
+  "uid": "saga-trace-logs",
+  "tags": ["choreography-saga", "traces", "logs"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "time": { "from": "now-30m", "to": "now" },
+  "refresh": "10s",
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "type": "custom",
+        "label": "Service",
+        "query": "order,payment,inventory",
+        "current": { "text": "order", "value": "order" },
+        "options": [
+          { "text": "order", "value": "order", "selected": true },
+          { "text": "payment", "value": "payment", "selected": false },
+          { "text": "inventory", "value": "inventory", "selected": false }
+        ]
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "text",
+      "title": "How to correlate",
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "Search a trace in **Explore → Tempo**, open a span, then use **Trace to logs** to jump into Loki filtered by `trace_id`. From any log line below, the **TraceID** derived field links back to Tempo. End-to-end saga trace spans Order → Payment → Inventory (AC-2/AC-6)."
+      }
+    },
+    {
+      "type": "logs",
+      "title": "Logs — $service (JSON, carries trace_id/span_id)",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 11, "w": 24, "x": 0, "y": 3 },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        { "refId": "A", "expr": "{service=\"$service\"}", "queryType": "range" }
+      ]
+    },
+    {
+      "type": "traces",
+      "title": "Recent saga traces",
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 14 },
+      "targets": [
+        { "refId": "A", "queryType": "traceqlSearch", "limit": 20, "filters": [] }
+      ]
+    }
+  ]
+}

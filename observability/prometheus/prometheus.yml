@@ -1,0 +1,29 @@
+# Prometheus scrape + rules config (tech-stack §9.1/§9.3).
+#
+# Prometheus scrapes the OpenTelemetry Collector's Prometheus exporter, which
+# exposes the service metrics forwarded over OTLP (saga_terminal_total,
+# payment_result_total, inventory_reserve_total, ...). It also scrapes the
+# Collector's own telemetry endpoint.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/rules/alerts.yml
+
+scrape_configs:
+  # Service metrics, forwarded services -> OTLP -> Collector -> this endpoint.
+  - job_name: otel-collector-metrics
+    static_configs:
+      - targets: ["otel-collector:8889"]
+
+  # The Collector's own internal telemetry.
+  - job_name: otel-collector-internal
+    static_configs:
+      - targets: ["otel-collector:8888"]
+
+  # Prometheus self-monitoring.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

@@ -1,0 +1,20 @@
+apiVersion: v2
+name: choreography-saga
+description: |
+  Choreography Saga demo — Order (Go), Payment (Python), Inventory (C++).
+  Deploys the three application services. Kafka, PostgreSQL (one per service),
+  and the observability backends (OTel Collector, Prometheus, Loki, Tempo,
+  Grafana) are treated as EXTERNAL dependencies and referenced by endpoint via
+  values.yaml — see values.yaml `global` and the README. Provide them either
+  from the Compose stack, in-cluster operators, or managed services.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - saga
+  - choreography
+  - kafka
+  - opentelemetry
+home: https://github.com/vladiant/choreography-saga
+maintainers:
+  - name: Release Engineer

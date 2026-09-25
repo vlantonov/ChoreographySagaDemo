@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory
+  namespace: choreography-saga
+  labels: { app.kubernetes.io/name: inventory, app.kubernetes.io/part-of: choreography-saga }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: inventory }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: inventory }
+    spec:
+      containers:
+        - name: inventory
+          image: choreography-saga/inventory:0.1.0
+          ports:
+            - { name: grpc, containerPort: 50052 }
+          env:
+            - name: INVENTORY_DATABASE_URL
+              valueFrom: { secretKeyRef: { name: inventory-db, key: url } }
+            - name: KAFKA_BROKERS
+              valueFrom: { configMapKeyRef: { name: saga-shared, key: KAFKA_BROKERS } }
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              valueFrom: { configMapKeyRef: { name: saga-shared, key: OTLP_ENDPOINT } }
+            - { name: OTEL_SERVICE_NAME, value: inventory }
+            - { name: KAFKA_CONSUMER_GROUP, value: inventory-service }
+            - { name: GRPC_LISTEN_ADDR, value: "0.0.0.0:50052" }
+          livenessProbe:
+            tcpSocket: { port: grpc }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 500m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory
+  namespace: choreography-saga
+  labels: { app.kubernetes.io/name: inventory, app.kubernetes.io/part-of: choreography-saga }
+spec:
+  selector: { app.kubernetes.io/name: inventory }
+  ports:
+    - { name: grpc, port: 50052, targetPort: grpc }

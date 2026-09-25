@@ -1,0 +1,85 @@
+# SLO alert rules (tech-stack §9.3, FR-25, AC-7).
+#
+# Thresholds are taken verbatim from the tech-stack SLO table. Rules are
+# expressed against the metrics the services actually emit today:
+#   - saga_terminal_total{outcome="confirmed"|"cancelled"}   (Order, Go)
+#   - payment_result_total{result="processed"|"failed"|"refunded"} (Payment, Py)
+#   - inventory_reserve_total{result=...}                    (Inventory, C++)
+#
+# The forced-failure demo (amount 66.06 / FORCE_PAYMENT_FAILURE / SKU-DEADBEEF)
+# is designed to trip the compensation and payment-failure alerts (AC-7).
+
+groups:
+  - name: saga-slo
+    rules:
+      # Compensation rate: cancelled / all terminal sagas. Warn > 20% over 5m.
+      - alert: HighCompensationRate
+        expr: |
+          sum(rate(saga_terminal_total{outcome="cancelled"}[5m]))
+            /
+          clamp_min(sum(rate(saga_terminal_total[5m])), 1e-9)
+            > 0.20
+        for: 5m
+        labels:
+          severity: warning
+          slo: compensation_rate
+        annotations:
+          summary: "Saga compensation rate > 20% (SLO ≤ 5%)"
+          description: "More than 20% of terminal sagas ended CANCELLED over the last 5m. Expected during the forced-failure demo (AC-7)."
+
+      # Payment failure rate: failed / all payment outcomes. Warn > 20% over 5m.
+      - alert: HighPaymentFailureRate
+        expr: |
+          sum(rate(payment_result_total{result="failed"}[5m]))
+            /
+          clamp_min(sum(rate(payment_result_total[5m])), 1e-9)
+            > 0.20
+        for: 5m
+        labels:
+          severity: warning
+          slo: payment_failure_rate
+        annotations:
+          summary: "Payment failure rate > 20% (SLO ≤ 5%)"
+          description: "More than 20% of payment attempts failed over the last 5m. Expected under FORCE_PAYMENT_FAILURE / magic amount 66.06 (AC-7)."
+
+      # Saga success rate: confirmed / all terminal. Page if < 95% over 5m.
+      - alert: LowSagaSuccessRate
+        expr: |
+          sum(rate(saga_terminal_total{outcome="confirmed"}[5m]))
+            /
+          clamp_min(sum(rate(saga_terminal_total[5m])), 1e-9)
+            < 0.95
+        for: 5m
+        labels:
+          severity: critical
+          slo: saga_success_rate
+        annotations:
+          summary: "Saga success rate < 95% (SLO ≥ 99%)"
+          description: "Fewer than 95% of terminal sagas reached CONFIRMED over the last 5m."
+
+      # Inventory reservation-failure rate. Warn > 20% over 5m.
+      - alert: HighInventoryReservationFailureRate
+        expr: |
+          sum(rate(inventory_reserve_total{result="insufficient_stock"}[5m]))
+            /
+          clamp_min(sum(rate(inventory_reserve_total[5m])), 1e-9)
+            > 0.20
+        for: 5m
+        labels:
+          severity: warning
+          slo: inventory_failure_rate
+        annotations:
+          summary: "Inventory reservation-failure rate > 20%"
+          description: "More than 20% of ReserveStock calls returned INSUFFICIENT_STOCK over the last 5m (e.g. SKU-DEADBEEF demo)."
+
+  - name: pipeline-health
+    rules:
+      # The metrics pipeline is down if Prometheus cannot scrape the Collector.
+      - alert: OtelCollectorScrapeDown
+        expr: up{job="otel-collector-metrics"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "OTel Collector metrics endpoint is down"
+          description: "Prometheus cannot scrape otel-collector:8889; service metrics/SLOs are blind."

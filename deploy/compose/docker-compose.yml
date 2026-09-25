@@ -1,0 +1,313 @@
+# Choreography Saga Demo — full local stack (AC-10, C-13, NFR-5).
+#
+# One command brings up: Kafka (KRaft), one PostgreSQL per service with
+# migrations applied, the three services built from their multi-stage
+# Dockerfiles, and the observability backbone (OTel Collector, Prometheus,
+# Loki, Tempo, Grafana, Promtail).
+#
+#   docker compose -f deploy/compose/docker-compose.yml up --build
+#
+# Trigger a saga:   curl -s localhost:8080/v1/orders -d '{"sku":"SKU-1","quantity":1,"amount":10.0,"customerId":"c1"}'
+# Forced failure:   ...amount":66.06...   (payment fails -> compensation)
+# Grafana:          http://localhost:3000  (admin/admin)
+#
+# Versions pinned per tech-stack §12.
+
+name: choreography-saga
+
+x-otlp-env: &otlp-env
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+  KAFKA_BROKERS: kafka:9092
+
+services:
+  # ---------------------------------------------------------------------------
+  # Messaging: single-node Kafka in KRaft mode (no ZooKeeper) — tech-stack §12.
+  # ---------------------------------------------------------------------------
+  kafka:
+    image: apache/kafka:3.8.0
+    hostname: kafka
+    ports:
+      - "29092:29092" # host-facing listener for debugging / kafka-ui
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,PLAINTEXT_HOST://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Single partition per topic keeps per-topic ordering (tech-stack §7).
+      KAFKA_NUM_PARTITIONS: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: 5L6g3nShT-eMCtK--X86sw
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 20s
+
+  # Create the saga topics explicitly with a single partition each (tech-stack §5.3).
+  kafka-init:
+    image: apache/kafka:3.8.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        BS=kafka:9092
+        for t in order.created payment.processed payment.failed \
+                 inventory.reserved inventory.reservation_failed \
+                 payment.refunded order.cancelled inventory.released; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$$BS" \
+            --create --if-not-exists --topic "$$t" --partitions 1 --replication-factor 1
+        done
+        echo "topics ready"
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # Databases: one PostgreSQL per service (database-per-service — tech-stack §4).
+  # ---------------------------------------------------------------------------
+  orders-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: order
+      POSTGRES_PASSWORD: order
+      POSTGRES_DB: orders
+    volumes:
+      - orders-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U order -d orders"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  payments-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: payment
+      POSTGRES_PASSWORD: payment
+      POSTGRES_DB: payments
+    volumes:
+      - payments-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U payment -d payments"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  inventory-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: inventory
+      POSTGRES_PASSWORD: inventory
+      POSTGRES_DB: inventory
+    volumes:
+      - inventory-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inventory -d inventory"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ---------------------------------------------------------------------------
+  # Migrations: apply each service's plain-SQL schema once, then exit.
+  # Services shipped their migrations under /app/migrations but do not
+  # self-migrate; we mount the source SQL and run it with psql.
+  # ---------------------------------------------------------------------------
+  orders-migrate:
+    image: postgres:16-alpine
+    depends_on:
+      orders-db:
+        condition: service_healthy
+    volumes:
+      - ../../services/order/migrations:/migrations:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - psql "postgresql://order:order@orders-db:5432/orders" -v ON_ERROR_STOP=1 -f /migrations/0001_init.up.sql
+    restart: "no"
+
+  payments-migrate:
+    image: postgres:16-alpine
+    depends_on:
+      payments-db:
+        condition: service_healthy
+    volumes:
+      - ../../services/payment/migrations:/migrations:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - psql "postgresql://payment:payment@payments-db:5432/payments" -v ON_ERROR_STOP=1 -f /migrations/0001_init.up.sql
+    restart: "no"
+
+  inventory-migrate:
+    image: postgres:16-alpine
+    depends_on:
+      inventory-db:
+        condition: service_healthy
+    volumes:
+      - ../../services/inventory/migrations:/migrations:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - psql "postgresql://inventory:inventory@inventory-db:5432/inventory" -v ON_ERROR_STOP=1 -f /migrations/0001_init.up.sql
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # Application services (built from their multi-stage Dockerfiles — C-12).
+  # ---------------------------------------------------------------------------
+  order:
+    image: choreography-saga/order:${IMAGE_TAG:-local}
+    build:
+      context: ../../services/order
+      dockerfile: Dockerfile
+    depends_on:
+      kafka:
+        condition: service_healthy
+      orders-migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *otlp-env
+      # Go OTLP exporter takes host:port without a scheme.
+      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
+      ORDER_DATABASE_URL: postgres://order:order@orders-db:5432/orders?sslmode=disable
+      ORDER_GRPC_ADDR: ":50051"
+      ORDER_HTTP_ADDR: ":8080"
+      OTEL_SERVICE_NAME: order
+      KAFKA_CONSUMER_GROUP: order-service
+      OUTBOX_RELAY_INTERVAL: ${OUTBOX_RELAY_INTERVAL:-500ms}
+      OUTBOX_RELAY_BATCH: ${OUTBOX_RELAY_BATCH:-100}
+    ports:
+      - "8080:8080"   # REST (grpc-gateway) — trigger orders with curl
+      - "50051:50051" # gRPC
+
+  payment:
+    image: choreography-saga/payment:${IMAGE_TAG:-local}
+    build:
+      context: ../../services/payment
+      dockerfile: Dockerfile
+    depends_on:
+      kafka:
+        condition: service_healthy
+      payments-migrate:
+        condition: service_completed_successfully
+      inventory:
+        condition: service_started
+    environment:
+      <<: *otlp-env
+      PAYMENT_DATABASE_URL: postgresql+psycopg://payment:payment@payments-db:5432/payments
+      INVENTORY_GRPC_TARGET: inventory:50052
+      OTEL_SERVICE_NAME: payment
+      KAFKA_CONSUMER_GROUP: payment-service
+      FORCE_PAYMENT_FAILURE: ${FORCE_PAYMENT_FAILURE:-false}
+      # Payment's config.py parses OUTBOX_RELAY_INTERVAL with float() as SECONDS,
+      # so it must be sourced from the *_SEC var — never the Go duration string.
+      OUTBOX_RELAY_INTERVAL: ${OUTBOX_RELAY_INTERVAL_SEC:-0.5}
+      OUTBOX_RELAY_BATCH: ${OUTBOX_RELAY_BATCH:-100}
+
+  inventory:
+    image: choreography-saga/inventory:${IMAGE_TAG:-local}
+    build:
+      # The inventory image needs the shared proto/ module, so its build
+      # context is the repository root (see services/inventory/Dockerfile).
+      context: ../../
+      dockerfile: services/inventory/Dockerfile
+    depends_on:
+      kafka:
+        condition: service_healthy
+      inventory-migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *otlp-env
+      INVENTORY_DATABASE_URL: postgresql://inventory:inventory@inventory-db:5432/inventory
+      GRPC_LISTEN_ADDR: 0.0.0.0:50052
+      OTEL_SERVICE_NAME: inventory
+      KAFKA_CONSUMER_GROUP: inventory-service
+      OUTBOX_RELAY_INTERVAL_MS: ${OUTBOX_RELAY_INTERVAL_MS:-500}
+      OUTBOX_RELAY_BATCH: ${OUTBOX_RELAY_BATCH:-100}
+    ports:
+      - "50052:50052" # gRPC ReserveStock/ReleaseStock
+
+  # ---------------------------------------------------------------------------
+  # Observability backbone (tech-stack §9).
+  # Pipeline: services --OTLP--> Collector --> Prometheus (metrics) /
+  #           Tempo (traces) / Loki (logs, via Promtail for container stdout).
+  # ---------------------------------------------------------------------------
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.108.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ../../observability/otel-collector/config.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+      - "8889:8889" # Prometheus exporter (scraped by Prometheus)
+    depends_on:
+      - tempo
+      - loki
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=6h
+      # Accept Tempo metrics-generator span-metrics/service-graph remote writes.
+      - --web.enable-remote-write-receiver
+    volumes:
+      - ../../observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../../observability/prometheus/rules:/etc/prometheus/rules:ro
+    ports:
+      - "9090:9090"
+
+  loki:
+    image: grafana/loki:3.1.1
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ../../observability/loki/loki.yaml:/etc/loki/loki.yaml:ro
+    ports:
+      - "3100:3100"
+
+  promtail:
+    image: grafana/promtail:3.1.1
+    command: ["-config.file=/etc/promtail/promtail.yaml"]
+    volumes:
+      - ../../observability/loki/promtail.yaml:/etc/promtail/promtail.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+
+  tempo:
+    image: grafana/tempo:2.6.0
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ../../observability/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+    ports:
+      - "3200:3200" # Tempo query API (Grafana datasource)
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_FEATURE_TOGGLES_ENABLE: traceToMetrics
+    volumes:
+      - ../../observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../../observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+
+volumes:
+  orders-db-data:
+  payments-db-data:
+  inventory-db-data:

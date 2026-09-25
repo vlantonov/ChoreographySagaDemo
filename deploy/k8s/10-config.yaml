@@ -1,0 +1,42 @@
+# Shared config + per-service DB secrets.
+#
+# Kafka, PostgreSQL and the observability stack are EXTERNAL to these manifests
+# (documented assumption — see deploy/README.md). Adjust the endpoints below to
+# match your cluster (in-cluster services, operators, or managed endpoints).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: saga-shared
+  namespace: choreography-saga
+data:
+  KAFKA_BROKERS: "kafka:9092"
+  # Go wants host:port; Python/C++ want a scheme.
+  OTLP_ENDPOINT_NOSCHEME: "otel-collector:4317"
+  OTLP_ENDPOINT: "http://otel-collector:4317"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: order-db
+  namespace: choreography-saga
+type: Opaque
+stringData:
+  url: "postgres://order:order@orders-db:5432/orders?sslmode=disable"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: payment-db
+  namespace: choreography-saga
+type: Opaque
+stringData:
+  url: "postgresql+psycopg://payment:payment@payments-db:5432/payments"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: inventory-db
+  namespace: choreography-saga
+type: Opaque
+stringData:
+  url: "postgresql://inventory:inventory@inventory-db:5432/inventory"

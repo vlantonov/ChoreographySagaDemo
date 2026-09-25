@@ -1,0 +1,72 @@
+# OpenTelemetry Collector (contrib 0.108) — tech-stack §9.1.
+#
+# Receives OTLP (traces + metrics) from all three services and fans out:
+#   traces  -> Tempo (OTLP)
+#   metrics -> Prometheus exporter endpoint (:8889, scraped by Prometheus)
+#   logs    -> Loki (services also log JSON to stdout, shipped by Promtail;
+#              this OTLP logs pipeline is wired for services that additionally
+#              export logs over OTLP).
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 5s
+  # Promote resource attributes (service.name) onto every signal.
+  resource:
+    attributes:
+      - key: collector
+        value: choreography-saga
+        action: upsert
+
+exporters:
+  # Metrics -> Prometheus scrape endpoint. resource_to_telemetry_conversion
+  # turns resource attributes (service.name) into metric labels (service_name).
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    resource_to_telemetry_conversion:
+      enabled: true
+    enable_open_metrics: true
+
+  # Traces -> Tempo over OTLP/gRPC.
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+  # Logs -> Loki. Uses the OTLP-to-Loki exporter; the log body/trace_id is
+  # preserved so Grafana can correlate to Tempo.
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
+
+  debug:
+    verbosity: basic
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [resource, batch]
+      exporters: [otlp/tempo]
+    metrics:
+      receivers: [otlp]
+      processors: [resource, batch]
+      exporters: [prometheus]
+    logs:
+      receivers: [otlp]
+      processors: [resource, batch]
+      exporters: [loki]
+  telemetry:
+    metrics:
+      address: 0.0.0.0:8888

@@ -1,0 +1,84 @@
+{{- if .Values.inventory.enabled -}}
+{{- $c := .Values.inventory -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}-inventory-db
+  labels:
+    app.kubernetes.io/name: inventory
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: choreography-saga
+type: Opaque
+stringData:
+  url: {{ $c.database.url | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-inventory
+  labels:
+    app.kubernetes.io/name: inventory
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: choreography-saga
+spec:
+  replicas: {{ $c.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: inventory
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: inventory
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: inventory
+          image: {{ include "cs.image" (dict "root" $ "image" $c.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: grpc
+              containerPort: {{ $c.service.grpcPort }}
+          env:
+            - name: INVENTORY_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $c.database.urlSecretName | default (printf "%s-inventory-db" .Release.Name) }}
+                  key: {{ $c.database.urlSecretKey }}
+            - name: KAFKA_BROKERS
+              value: {{ .Values.global.kafkaBrokers | quote }}
+            - name: KAFKA_CONSUMER_GROUP
+              value: {{ $c.consumerGroup | quote }}
+            - name: GRPC_LISTEN_ADDR
+              value: "0.0.0.0:{{ $c.service.grpcPort }}"
+            - name: OTEL_SERVICE_NAME
+              value: inventory
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.global.otlpEndpoint | quote }}
+          livenessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources: {{ toYaml $c.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-inventory
+  labels:
+    app.kubernetes.io/name: inventory
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: choreography-saga
+spec:
+  selector:
+    app.kubernetes.io/name: inventory
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: grpc
+      port: {{ $c.service.grpcPort }}
+      targetPort: grpc
+{{- end }}

@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order
+  namespace: choreography-saga
+  labels: { app.kubernetes.io/name: order, app.kubernetes.io/part-of: choreography-saga }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: order }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: order }
+    spec:
+      containers:
+        - name: order
+          image: choreography-saga/order:0.1.0
+          ports:
+            - { name: grpc, containerPort: 50051 }
+            - { name: http, containerPort: 8080 }
+          env:
+            - name: ORDER_DATABASE_URL
+              valueFrom: { secretKeyRef: { name: order-db, key: url } }
+            - name: KAFKA_BROKERS
+              valueFrom: { configMapKeyRef: { name: saga-shared, key: KAFKA_BROKERS } }
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              valueFrom: { configMapKeyRef: { name: saga-shared, key: OTLP_ENDPOINT_NOSCHEME } }
+            - { name: OTEL_SERVICE_NAME, value: order }
+            - { name: KAFKA_CONSUMER_GROUP, value: order-service }
+            - { name: ORDER_GRPC_ADDR, value: ":50051" }
+            - { name: ORDER_HTTP_ADDR, value: ":8080" }
+          readinessProbe:
+            tcpSocket: { port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: grpc }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 500m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order
+  namespace: choreography-saga
+  labels: { app.kubernetes.io/name: order, app.kubernetes.io/part-of: choreography-saga }
+spec:
+  selector: { app.kubernetes.io/name: order }
+  ports:
+    - { name: grpc, port: 50051, targetPort: grpc }
+    - { name: http, port: 8080, targetPort: http }

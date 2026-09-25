@@ -1,0 +1,14 @@
+# Auto-load dashboards from the mounted dashboards directory.
+apiVersion: 1
+
+providers:
+  - name: choreography-saga
+    orgId: 1
+    folder: Choreography Saga
+    type: file
+    disableDeletion: false
+    editable: true
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false
