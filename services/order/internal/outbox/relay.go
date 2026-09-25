@@ -7,6 +7,8 @@ import (
 	"context"
 	"log/slog"
 	"time"
+
+	"go.opentelemetry.io/otel/metric"
 )
 
 // Record is one pending outbox row (tech-stack §8.1).
@@ -18,6 +20,7 @@ type Record struct {
 	Topic         string
 	Payload       []byte
 	Traceparent   string
+	CreatedAt     time.Time
 }
 
 // Repo reads and marks outbox rows. The SQL implementation selects PENDING rows
@@ -26,6 +29,9 @@ type Repo interface {
 	FetchPending(ctx context.Context, limit int) ([]Record, error)
 	MarkPublished(ctx context.Context, id string) error
 	MarkFailed(ctx context.Context, id string) error
+	// CountPending returns the number of unpublished outbox rows, backing the
+	// outbox_pending SLO gauge (tech-stack §9.3).
+	CountPending(ctx context.Context) (int64, error)
 }
 
 // Publisher sends a single record to the event backbone.
@@ -35,22 +41,47 @@ type Publisher interface {
 
 // Relay polls the outbox and publishes pending rows at-least-once.
 type Relay struct {
-	repo      Repo
-	pub       Publisher
-	log       *slog.Logger
-	batchSize int
-	interval  time.Duration
+	repo       Repo
+	pub        Publisher
+	log        *slog.Logger
+	batchSize  int
+	interval   time.Duration
+	publishLag metric.Float64Histogram
 }
 
 // NewRelay constructs a relay. interval<=0 defaults to 500ms; batch<=0 to 100.
-func NewRelay(repo Repo, pub Publisher, log *slog.Logger, interval time.Duration, batch int) *Relay {
+// It also registers the outbox SLO metrics (tech-stack §9.3): an observable
+// outbox_pending gauge (backlog depth) and an outbox_publish_lag_seconds
+// histogram (row age at publish time).
+func NewRelay(repo Repo, pub Publisher, log *slog.Logger, meter metric.Meter, interval time.Duration, batch int) (*Relay, error) {
 	if interval <= 0 {
 		interval = 500 * time.Millisecond
 	}
 	if batch <= 0 {
 		batch = 100
 	}
-	return &Relay{repo: repo, pub: pub, log: log, batchSize: batch, interval: interval}
+	publishLag, err := meter.Float64Histogram("outbox_publish_lag_seconds",
+		metric.WithDescription("age of an outbox row when the relay publishes it"),
+		metric.WithUnit("s"))
+	if err != nil {
+		return nil, err
+	}
+	pending, err := meter.Int64ObservableGauge("outbox_pending",
+		metric.WithDescription("current count of unpublished outbox rows"))
+	if err != nil {
+		return nil, err
+	}
+	if _, err := meter.RegisterCallback(func(ctx context.Context, o metric.Observer) error {
+		n, cErr := repo.CountPending(ctx)
+		if cErr != nil {
+			return cErr
+		}
+		o.ObserveInt64(pending, n)
+		return nil
+	}, pending); err != nil {
+		return nil, err
+	}
+	return &Relay{repo: repo, pub: pub, log: log, batchSize: batch, interval: interval, publishLag: publishLag}, nil
 }
 
 // Run loops until ctx is cancelled, draining the outbox each tick.
@@ -90,6 +121,9 @@ func (r *Relay) drainOnce(ctx context.Context) (int, error) {
 		if err := r.repo.MarkPublished(ctx, rec.ID); err != nil {
 			// Published but not marked: duplicate on restart, absorbed by idempotency.
 			return published, err
+		}
+		if !rec.CreatedAt.IsZero() {
+			r.publishLag.Record(ctx, time.Since(rec.CreatedAt).Seconds())
 		}
 		published++
 	}

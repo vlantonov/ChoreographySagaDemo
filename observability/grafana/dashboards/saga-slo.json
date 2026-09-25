@@ -135,6 +135,86 @@
       "targets": [
         { "refId": "A", "legendFormat": "{{service}}", "expr": "sum by (service) (rate(traces_spanmetrics_calls_total[1m]))" }
       ]
+    },
+    {
+      "type": "row",
+      "title": "SLO: Latency & Outbox lag",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 25 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Saga end-to-end p95 latency (SLO ≤ 2s, warn > 4s)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 26 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 2 },
+            { "color": "red", "value": 4 }
+          ] }
+        }
+      },
+      "targets": [
+        { "refId": "A", "legendFormat": "p95", "expr": "histogram_quantile(0.95, sum by (le) (rate(saga_duration_seconds_bucket[5m])))" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "ReserveStock p95 latency (SLO ≤ 250ms, warn > 750ms)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 26 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 0.25 },
+            { "color": "red", "value": 0.75 }
+          ] }
+        }
+      },
+      "targets": [
+        { "refId": "A", "legendFormat": "p95", "expr": "histogram_quantile(0.95, sum by (le) (rate(reserve_stock_server_duration_seconds_bucket[5m])))" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Outbox pending backlog by service (warn > 100)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 34 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "red", "value": 100 }
+          ] }
+        }
+      },
+      "targets": [
+        { "refId": "A", "legendFormat": "{{service_name}}", "expr": "max by (service_name) (outbox_pending)" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Outbox publish-lag p95 by service (SLO ≤ 1s, warn > 10s)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 34 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 1 },
+            { "color": "red", "value": 10 }
+          ] }
+        }
+      },
+      "targets": [
+        { "refId": "A", "legendFormat": "{{service_name}}", "expr": "histogram_quantile(0.95, sum by (le, service_name) (rate(outbox_publish_lag_seconds_bucket[5m])))" }
+      ]
     }
   ]
 }

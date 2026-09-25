@@ -1,5 +1,9 @@
 #include "inventory/outbox.hpp"
 
+#include <chrono>
+
+#include "inventory/obs.hpp"
+
 namespace inventory::outbox {
 
 Relay::Relay(Repo& repo, Publisher& publisher, int batch_size)
@@ -17,9 +21,17 @@ int Relay::drain_once() {
       throw;
     }
     repo_.mark_published(rec.id);
+    if (rec.created_at.time_since_epoch().count() != 0) {
+      const double lag = std::chrono::duration<double>(
+                             std::chrono::system_clock::now() - rec.created_at)
+                             .count();
+      obs::record_outbox_publish_lag(lag);
+    }
     ++published;
   }
   return published;
 }
+
+int64_t Relay::pending_count() { return repo_.count_pending(); }
 
 }  // namespace inventory::outbox

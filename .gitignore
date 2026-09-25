@@ -1,0 +1,22 @@
+# Build outputs
+services/**/build/
+services/order/bin/
+*.o
+*.obj
+
+# Go
+*.test
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Env / local overrides
+*.local
+
+# OS / editor
+.DS_Store

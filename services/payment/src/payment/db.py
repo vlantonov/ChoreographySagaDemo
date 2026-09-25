@@ -137,7 +137,7 @@ class Database:
                 text(
                     """
                     SELECT id, topic, aggregate_id, payload::text,
-                           COALESCE(headers->>'traceparent', '')
+                           COALESCE(headers->>'traceparent', ''), created_at
                     FROM outbox
                     WHERE status = 'PENDING'
                     ORDER BY created_at
@@ -154,9 +154,17 @@ class Database:
                 aggregate_id=r[2],
                 payload=r[3].encode("utf-8"),
                 traceparent=r[4],
+                created_at=r[5],
             )
             for r in rows
         ]
+
+    def count_pending(self) -> int:
+        with self._engine.begin() as conn:
+            row = conn.execute(
+                text("SELECT count(*) FROM outbox WHERE status = 'PENDING'")
+            ).one()
+        return int(row[0])
 
     def mark_published(self, record_id: str) -> None:
         with self._engine.begin() as conn:

@@ -47,7 +47,7 @@ def main() -> int:
         meter=meter,
         force_failure=cfg.force_failure,
     )
-    relay = Relay(db, producer, cfg.relay_batch_size)
+    relay = Relay(db, producer, cfg.relay_batch_size, meter=meter)
     consumer = KafkaConsumer(
         cfg.kafka_brokers, cfg.consumer_group, PaymentProcessor.consumed_topics()
     )

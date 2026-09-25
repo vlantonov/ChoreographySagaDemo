@@ -6,6 +6,14 @@
 #   - payment_result_total{result="processed"|"failed"|"refunded"} (Payment, Py)
 #   - inventory_reserve_total{result=...}                    (Inventory, C++)
 #
+# Latency/lag SLIs (tech-stack §9.3). Instrument -> exported Prometheus series
+# (Collector `prometheus` exporter: histograms gain _bucket/_sum/_count,
+# resource_to_telemetry_conversion maps service.name -> the service_name label):
+#   - saga_duration_seconds                 -> saga_duration_seconds_bucket        (Order, Go)
+#   - outbox_pending (observable gauge)      -> outbox_pending{service_name}        (all three)
+#   - outbox_publish_lag_seconds            -> outbox_publish_lag_seconds_bucket{service_name} (all three)
+#   - reserve_stock_server_duration_seconds -> reserve_stock_server_duration_seconds_bucket (Inventory, C++)
+#
 # The forced-failure demo (amount 66.06 / FORCE_PAYMENT_FAILURE / SKU-DEADBEEF)
 # is designed to trip the compensation and payment-failure alerts (AC-7).
 
@@ -71,6 +79,71 @@ groups:
         annotations:
           summary: "Inventory reservation-failure rate > 20%"
           description: "More than 20% of ReserveStock calls returned INSUFFICIENT_STOCK over the last 5m (e.g. SKU-DEADBEEF demo)."
+
+      # --- Latency / lag SLOs (tech-stack §9.3) ---
+
+      # Saga end-to-end p95 latency (create -> terminal). SLO p95 ≤ 2s;
+      # warn if p95 > 4s over 5m. saga_duration_seconds is a Float64Histogram
+      # emitted by Order; the exporter suffixes buckets with _bucket.
+      - alert: HighSagaLatencyP95
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(saga_duration_seconds_bucket[5m]))
+          ) > 4
+        for: 5m
+        labels:
+          severity: warning
+          slo: saga_latency
+        annotations:
+          summary: "Saga end-to-end p95 latency > 4s (SLO ≤ 2s)"
+          description: "95th-percentile create→terminal saga latency exceeded 4s over the last 5m."
+
+      # Outbox publish lag: age of a row when the relay publishes it. SLO p95 ≤ 1s;
+      # warn if p95 > 10s over 5m. Emitted by all three services; labeled per
+      # service via the service_name label (from service.name).
+      - alert: HighOutboxPublishLagP95
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, service_name) (rate(outbox_publish_lag_seconds_bucket[5m]))
+          ) > 10
+        for: 5m
+        labels:
+          severity: warning
+          slo: outbox_publish_lag
+        annotations:
+          summary: "Outbox publish lag p95 > 10s on {{ $labels.service_name }} (SLO ≤ 1s)"
+          description: "95th-percentile outbox row age at publish time exceeded 10s over the last 5m for {{ $labels.service_name }}; the relay is falling behind."
+
+      # Outbox backlog depth. Warn if > 100 pending rows over 5m, per service.
+      # outbox_pending is an observable gauge (single replica -> max collapses
+      # any transient duplicate series to one value per service).
+      - alert: HighOutboxBacklog
+        expr: max by (service_name) (outbox_pending) > 100
+        for: 5m
+        labels:
+          severity: warning
+          slo: outbox_backlog
+        annotations:
+          summary: "Outbox backlog > 100 pending on {{ $labels.service_name }}"
+          description: "More than 100 unpublished outbox rows on {{ $labels.service_name }} over the last 5m."
+
+      # ReserveStock sync gRPC handler p95 latency (Inventory). SLO p95 ≤ 250ms;
+      # warn if p95 > 750ms over 5m.
+      - alert: HighReserveStockLatencyP95
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(reserve_stock_server_duration_seconds_bucket[5m]))
+          ) > 0.75
+        for: 5m
+        labels:
+          severity: warning
+          slo: reserve_stock_latency
+        annotations:
+          summary: "ReserveStock p95 latency > 750ms (SLO ≤ 250ms)"
+          description: "95th-percentile ReserveStock gRPC handler latency exceeded 750ms over the last 5m."
 
   - name: pipeline-health
     rules:

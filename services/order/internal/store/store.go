@@ -6,6 +6,7 @@ package store
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -29,6 +30,8 @@ type Order struct {
 	Quantity   int32
 	Amount     float64
 	Status     domain.Status
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // OutboxInsert is an event to enqueue transactionally with a business write.
@@ -64,9 +67,9 @@ func (s *Store) CreateOrder(ctx context.Context, o Order, ob OutboxInsert) (Orde
 func (s *Store) GetOrder(ctx context.Context, id string) (Order, error) {
 	var o Order
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, customer_id, sku, quantity, amount, status
+		SELECT id, customer_id, sku, quantity, amount, status, created_at, updated_at
 		FROM orders WHERE id = $1`, id).
-		Scan(&o.ID, &o.CustomerID, &o.SKU, &o.Quantity, &o.Amount, &o.Status)
+		Scan(&o.ID, &o.CustomerID, &o.SKU, &o.Quantity, &o.Amount, &o.Status, &o.CreatedAt, &o.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Order{}, ErrNotFound
 	}
@@ -143,7 +146,7 @@ func (s *Store) FetchPending(ctx context.Context, limit int) ([]outbox.Record, e
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 			SELECT id, aggregate_type, aggregate_id, event_type, topic, payload,
-			       COALESCE(headers->>'traceparent', '')
+			       COALESCE(headers->>'traceparent', ''), created_at
 			FROM outbox
 			WHERE status = 'PENDING'
 			ORDER BY created_at
@@ -156,7 +159,7 @@ func (s *Store) FetchPending(ctx context.Context, limit int) ([]outbox.Record, e
 		for rows.Next() {
 			var r outbox.Record
 			if err := rows.Scan(&r.ID, &r.AggregateType, &r.AggregateID,
-				&r.EventType, &r.Topic, &r.Payload, &r.Traceparent); err != nil {
+				&r.EventType, &r.Topic, &r.Payload, &r.Traceparent, &r.CreatedAt); err != nil {
 				return err
 			}
 			recs = append(recs, r)
@@ -164,6 +167,15 @@ func (s *Store) FetchPending(ctx context.Context, limit int) ([]outbox.Record, e
 		return rows.Err()
 	})
 	return recs, err
+}
+
+// CountPending returns the number of PENDING outbox rows, backing the
+// outbox_pending SLO gauge (tech-stack §9.3).
+func (s *Store) CountPending(ctx context.Context) (int64, error) {
+	var n int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM outbox WHERE status = 'PENDING'`).Scan(&n)
+	return n, err
 }
 
 // MarkPublished flags a row as dispatched after the broker acks (FR-10).

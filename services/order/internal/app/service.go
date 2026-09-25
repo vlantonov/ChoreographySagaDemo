@@ -51,11 +51,12 @@ var topicTrigger = map[string]domain.Trigger{
 
 // Service holds the Order application dependencies.
 type Service struct {
-	store      *store.Store
-	log        *slog.Logger
-	tracer     trace.Tracer
-	propagator propagation.TextMapPropagator
-	terminals  metric.Int64Counter
+	store        *store.Store
+	log          *slog.Logger
+	tracer       trace.Tracer
+	propagator   propagation.TextMapPropagator
+	terminals    metric.Int64Counter
+	sagaDuration metric.Float64Histogram
 }
 
 func New(st *store.Store, log *slog.Logger, tracer trace.Tracer, meter metric.Meter) (*Service, error) {
@@ -64,12 +65,19 @@ func New(st *store.Store, log *slog.Logger, tracer trace.Tracer, meter metric.Me
 	if err != nil {
 		return nil, err
 	}
+	sagaDuration, err := meter.Float64Histogram("saga_duration_seconds",
+		metric.WithDescription("end-to-end saga latency from order creation to terminal state"),
+		metric.WithUnit("s"))
+	if err != nil {
+		return nil, err
+	}
 	return &Service{
-		store:      st,
-		log:        log,
-		tracer:     tracer,
-		propagator: propagation.TraceContext{},
-		terminals:  terminals,
+		store:        st,
+		log:          log,
+		tracer:       tracer,
+		propagator:   propagation.TraceContext{},
+		terminals:    terminals,
+		sagaDuration: sagaDuration,
 	}, nil
 }
 
@@ -215,6 +223,11 @@ func (s *Service) recordTerminal(ctx context.Context, orderID string) {
 		outcome = "cancelled"
 	}
 	s.terminals.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", outcome)))
+	// End-to-end saga latency: creation → terminal transition (tech-stack §9.3).
+	if !o.CreatedAt.IsZero() && !o.UpdatedAt.IsZero() {
+		s.sagaDuration.Record(ctx, o.UpdatedAt.Sub(o.CreatedAt).Seconds(),
+			metric.WithAttributes(attribute.String("outcome", outcome)))
+	}
 }
 
 // traceparent injects the active span context into a W3C traceparent string.

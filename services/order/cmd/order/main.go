@@ -64,7 +64,10 @@ func run() error {
 	}
 
 	// Outbox relay (FR-10, FR-11).
-	relay := outbox.NewRelay(st, producer, log, cfg.RelayInterval, cfg.RelayBatchSize)
+	relay, err := outbox.NewRelay(st, producer, log, providers.Meter, cfg.RelayInterval, cfg.RelayBatchSize)
+	if err != nil {
+		return err
+	}
 	go relay.Run(rootCtx)
 
 	// Kafka consumer driving the saga state machine.

@@ -3,6 +3,7 @@
 // unit-testable with in-memory fakes (no Kafka, no Postgres).
 #pragma once
 
+#include <chrono>
 #include <string>
 #include <vector>
 
@@ -25,6 +26,10 @@ struct Record {
   std::string aggregate_id;
   std::string payload;
   std::string traceparent;
+  // created_at is the row insert time; the relay reports (now - created_at) as
+  // the outbox_publish_lag_seconds SLI (tech-stack §9.3). Epoch default means
+  // "unknown" and suppresses the lag sample.
+  std::chrono::system_clock::time_point created_at{};
 };
 
 // Repo reads and marks outbox rows. The SQL implementation selects PENDING rows
@@ -35,6 +40,9 @@ class Repo {
   virtual std::vector<Record> fetch_pending(int limit) = 0;
   virtual void mark_published(const std::string& id) = 0;
   virtual void mark_failed(const std::string& id) = 0;
+  // count_pending returns the number of unpublished rows, backing the
+  // outbox_pending SLO gauge (tech-stack §9.3).
+  virtual int64_t count_pending() = 0;
 };
 
 // Publisher sends a single record to the event backbone (implemented by the
@@ -55,6 +63,10 @@ class Relay {
   // published. A publish failure leaves the row PENDING for a later retry and
   // is rethrown so the caller can back off.
   int drain_once();
+
+  // pending_count returns the current backlog depth for the outbox_pending
+  // observable gauge (tech-stack §9.3).
+  int64_t pending_count();
 
  private:
   Repo& repo_;

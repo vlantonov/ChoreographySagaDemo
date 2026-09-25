@@ -33,11 +33,12 @@ New-project chain: **requirements-analyst → system-architect → developer →
 - Implementation stage: `20a8a1c` semver(minor).
 - QA stage: `2c69aa3` semver(patch).
 - D1/D2/D3 remediation loop (Architect+Developer): `9af2d12` semver(patch).
-- Release stage (packaging + observability + CI): pending commit.
+- Release stage (packaging + observability + CI): `c5720d4` semver(minor).
+- SLO metrics loop (Developer metrics + Release alerts/panels): pending commit.
 
 ## Carry-forward (latency-SLO gap)
-- tech-stack §9.3 latency/lag SLOs (saga p95>4s, outbox lag>10s/backlog>100, ReserveStock p95>750ms) lack backing metrics: services emit only counters, not `saga_duration_seconds`, `outbox_pending`, `outbox_publish_lag_seconds`, or RPC-duration histograms. Planned Developer→Release loop to emit metrics + add latency alerts/dashboard panels.
-- Post-Release live regression still owed: full compose bring-up, forced-failure demo tripping compensation alerts, Grafana trace↔log click-through, C++ full vcpkg/Docker server build, helm/promtool/otelcol/kubeconform on a tooled CI box.
+- RESOLVED: services now emit `saga_duration_seconds`, `outbox_pending`, `outbox_publish_lag_seconds` (Order/Payment/Inventory) and `reserve_stock_server_duration_seconds` (Inventory); latency/lag alerts + dashboard panels added. C++ metric code verifies on the vcpkg/Docker build.
+- Post-Release live regression still owed: full compose bring-up, forced-failure demo tripping compensation + latency alerts, Grafana trace↔log click-through, C++ full vcpkg/Docker server build, helm/promtool/otelcol/kubeconform on a tooled CI box.
 
 ## Open defects (QA)
 - **D1 (Medium)** — FIXED: Order now parks premature out-of-order events (`ErrPrematureEvent`) and the consumer rewinds/redelivers instead of dropping. New domain tests + live-Kafka reorder check deferred to post-Release regression.

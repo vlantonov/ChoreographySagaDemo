@@ -8,6 +8,7 @@
 // trace-context provider so every log line carries trace_id/span_id.
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <initializer_list>
 #include <string>
@@ -35,6 +36,21 @@ using TraceContextFn = std::function<void(nlohmann::json&)>;
 // each log line. Called by setup(); defaults to a no-op for tests.
 void set_trace_context_provider(TraceContextFn fn);
 
+// --- outbox SLO metrics (tech-stack §9.3), core-side hook ---
+
+// OutboxLagRecorder receives the age (seconds) of an outbox row at publish
+// time. setup() installs an OpenTelemetry-backed recorder; the core library and
+// tests default to a no-op, keeping the relay free of an OTel dependency.
+using OutboxLagRecorder = std::function<void(double)>;
+
+// set_outbox_lag_recorder installs the publish-lag recorder. setup() calls it
+// with the OTel histogram; tests may install a capturing recorder.
+void set_outbox_lag_recorder(OutboxLagRecorder fn);
+
+// record_outbox_publish_lag records one outbox_publish_lag_seconds sample via
+// the installed recorder (no-op if none is installed).
+void record_outbox_publish_lag(double seconds);
+
 // --- server-only (implemented against the OpenTelemetry C++ SDK) ---
 
 // setup initialises the tracer/meter providers, the OTLP exporter, and the log
@@ -49,6 +65,15 @@ std::string inject_traceparent();
 
 // record_reserve increments the reserve-outcome counter (tech-stack §9.3).
 void record_reserve(std::string_view result);
+
+// record_reserve_duration records the ReserveStock server-handler latency
+// (seconds) into the reserve_stock_server_duration_seconds histogram
+// (tech-stack §9.3, gRPC ReserveStock p95 SLO).
+void record_reserve_duration(double seconds, std::string_view result);
+
+// register_outbox_pending_gauge installs an observable gauge (outbox_pending)
+// that reports the current backlog via observe() on each metric collection.
+void register_outbox_pending_gauge(std::function<int64_t()> observe);
 
 // start_span begins a span for the given operation and makes it current for the
 // lifetime of the returned scope holder (opaque, server-only).

@@ -14,6 +14,7 @@ namespace {
 
 std::mutex g_log_mutex;
 TraceContextFn g_trace_context;  // default: empty (no-op)
+OutboxLagRecorder g_outbox_lag;  // default: empty (no-op)
 
 std::string timestamp() {
   const auto now = std::chrono::system_clock::now();
