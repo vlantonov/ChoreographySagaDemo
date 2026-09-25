@@ -161,4 +161,14 @@ void Database::mark_failed(const std::string& id) {
   tx.commit();
 }
 
+int64_t Database::count_pending() {
+  const std::lock_guard<std::mutex> lock(impl_->mutex);
+  pqxx::work tx(impl_->conn);
+  const pqxx::row row =
+      tx.exec1("SELECT count(*) FROM outbox WHERE status = 'PENDING'");
+  const auto n = row[0].as<int64_t>();
+  tx.commit();
+  return n;
+}
+
 }  // namespace inventory::db

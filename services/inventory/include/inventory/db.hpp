@@ -39,6 +39,7 @@ class Database : public repo::Repository, public outbox::Repo {
   std::vector<outbox::Record> fetch_pending(int limit) override;
   void mark_published(const std::string& id) override;
   void mark_failed(const std::string& id) override;
+  int64_t count_pending() override;
 
  private:
   struct Impl;

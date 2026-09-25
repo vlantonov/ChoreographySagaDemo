@@ -35,8 +35,18 @@ New-project chain: **requirements-analyst → system-architect → developer →
 - D1/D2/D3 remediation loop (Architect+Developer): `9af2d12` semver(patch).
 - Release stage (packaging + observability + CI): `c5720d4` semver(minor).
 - SLO metrics loop (Developer metrics + Release alerts/panels): `91c9c1a` semver(minor).
-- Documentation stage (README/CHANGELOG + demo scripts + go.mod fix): pending commit.
+- Documentation stage (README/CHANGELOG + demo scripts + go.mod fix): `896b7e2` semver(minor).
 - Version publish: v0.1.0 (initial release, MINOR).
+- Maintenance: fix C++ Inventory CI build (Maintenance Engineer) → v0.1.1 (PATCH).
+
+## Post-release maintenance
+- **CI fix (C++ Inventory):** the outbox SLO-metrics change left three interface members
+  unimplemented — `FakeOutboxRepo::count_pending` (broke `relay_test.cpp`), the core
+  `obs.cpp` lag-recorder definitions (broke `inventory_core` link), and a real production
+  `db::Database::count_pending` gap (server build, not exercised by CI). All fixed; a
+  `Relay.PendingCountTracksUnpublishedRows` regression test added. CI-equivalent core+tests
+  build passes 11/11. The `db.cpp` production fix still needs the full vcpkg/Docker server
+  build to compile-verify.
 
 ## Documentation-stage doc drift (resolved)
 - Demo scripts `scripts/run-demo.sh` and `scripts/force-failure.sh` now shipped (target the

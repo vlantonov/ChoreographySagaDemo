@@ -61,4 +61,12 @@ void log_error(std::string_view message, std::initializer_list<Field> fields) {
 
 void set_trace_context_provider(TraceContextFn fn) { g_trace_context = std::move(fn); }
 
+void set_outbox_lag_recorder(OutboxLagRecorder fn) { g_outbox_lag = std::move(fn); }
+
+void record_outbox_publish_lag(double seconds) {
+  if (g_outbox_lag) {
+    g_outbox_lag(seconds);
+  }
+}
+
 }  // namespace inventory::obs

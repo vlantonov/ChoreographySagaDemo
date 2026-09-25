@@ -41,4 +41,18 @@ TEST(Relay, PublishFailureLeavesRowPending) {
   EXPECT_EQ(repo.failed["1"], 1);        // attempt counter bumped
 }
 
+TEST(Relay, PendingCountTracksUnpublishedRows) {
+  FakeOutboxRepo repo;
+  repo.pending = {
+      Record{"1", "inventory.reserved", "saga-1", "{}", "tp-1"},
+      Record{"2", "inventory.reservation_failed", "saga-2", "{}", "tp-2"},
+  };
+  FakePublisher pub;
+  Relay relay(repo, pub, 100);
+
+  EXPECT_EQ(relay.pending_count(), 2);   // backlog gauge before draining
+  EXPECT_EQ(relay.drain_once(), 2);
+  EXPECT_EQ(relay.pending_count(), 0);   // all rows published
+}
+
 }  // namespace

@@ -5,6 +5,28 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] — 2026-09-26
+
+### Fixed
+
+- **Inventory (C++) CI build break from the outbox SLO-metrics change.** The new
+  `outbox_pending` SLO gauge added `outbox::Repo::count_pending()` and the
+  `obs::record_outbox_publish_lag` / `obs::set_outbox_lag_recorder` core hooks, but
+  three implementations were left incomplete:
+  - `testing::FakeOutboxRepo` (`test/fakes.hpp`) did not override `count_pending()`, so it
+    stayed abstract and `relay_test.cpp` failed to compile — added an override returning the
+    count of not-yet-published rows.
+  - The core `obs.cpp` declared the `g_outbox_lag` recorder but never defined
+    `record_outbox_publish_lag` / `set_outbox_lag_recorder`, breaking the `inventory_core`
+    link (undefined reference from the relay) — added both definitions (no-op until a
+    recorder is installed).
+  - The production `db::Database` (`db.hpp` / `db.cpp`), which also derives from
+    `outbox::Repo`, was missing `count_pending()` — added the override (`SELECT count(*)
+    FROM outbox WHERE status = 'PENDING'`), matching the existing `fetch_pending` SQL. This
+    would have broken the server build (`INVENTORY_BUILD_SERVER=ON`), which CI does not
+    exercise.
+  - Added `Relay.PendingCountTracksUnpublishedRows` regression test covering the backlog gauge.
+
 ## [0.1.0] — 2026-09-26
 
 Initial, feature-complete release of the Choreography Saga demo: a polyglot
@@ -60,4 +82,5 @@ transactions across three services and databases.
 - **D2 — refund trigger:** Payment now refunds only on `inventory.reservation_failed`; the
   redundant `order.cancelled` refund path was removed so a payment is not refunded twice.
 
+[0.1.1]: https://github.com/vladiant/ChoreographySagaDemo/releases/tag/v0.1.1
 [0.1.0]: https://github.com/vladiant/ChoreographySagaDemo/releases/tag/v0.1.0

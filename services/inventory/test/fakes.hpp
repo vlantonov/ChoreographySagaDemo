@@ -113,6 +113,13 @@ class FakeOutboxRepo : public outbox::Repo {
   }
   void mark_published(const std::string& id) override { published.insert(id); }
   void mark_failed(const std::string& id) override { ++failed[id]; }
+  int64_t count_pending() override {
+    int64_t n = 0;
+    for (const auto& r : pending) {
+      if (published.count(r.id) == 0) ++n;
+    }
+    return n;
+  }
 };
 
 class FakePublisher : public outbox::Publisher {
