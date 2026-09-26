@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Reproducible, faster inventory image build.** Pinned vcpkg to release tag `2026.07.29`
+  (`git clone --branch`) with a matching `builtin-baseline`
+  (`9e593bb18ea69cc5095e012465dcd675a822ed0d`) in `vcpkg.json`, removing the previous
+  floating-`HEAD` clone that made the build non-reproducible. Added a release-only overlay
+  triplet (`x64-linux-release`, stock `x64-linux` + `VCPKG_BUILD_TYPE release`) so
+  dependencies compile once instead of in both debug and release, roughly halving the
+  toolchain build time.
+
 ## [0.1.3] — 2026-09-26
 
 ### Fixed

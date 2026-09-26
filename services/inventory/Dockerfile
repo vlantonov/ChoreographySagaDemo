@@ -15,8 +15,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates cmake curl flex git libtool linux-libc-dev \
         ninja-build pkg-config python3 tar unzip zip \
     && rm -rf /var/lib/apt/lists/*
-# Bootstrap vcpkg (dependency manager per tech-stack §13).
-RUN git clone --depth 1 https://github.com/microsoft/vcpkg "$VCPKG_ROOT" \
+# Bootstrap vcpkg (dependency manager per tech-stack §13). Pinned to a specific
+# release tag for reproducibility; the tag's commit SHA must match vcpkg.json's
+# builtin-baseline so manifest resolution is deterministic.
+RUN git clone --depth 1 --branch 2026.07.29 https://github.com/microsoft/vcpkg "$VCPKG_ROOT" \
     && "$VCPKG_ROOT"/bootstrap-vcpkg.sh -disableMetrics
 RUN mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
 
@@ -27,11 +29,16 @@ COPY proto ./proto
 COPY services/inventory ./services/inventory
 
 WORKDIR /src/services/inventory
+# The x64-linux-release overlay triplet builds dependencies release-only
+# (skips the debug variant), roughly halving vcpkg compile time. Its path
+# resolves relative to this WORKDIR: /src/services/inventory/triplets.
 RUN --mount=type=cache,target=/opt/vcpkg-cache \
     cmake -S . -B build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DINVENTORY_BUILD_TESTS=OFF \
         -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+        -DVCPKG_TARGET_TRIPLET=x64-linux-release \
+        -DVCPKG_OVERLAY_TRIPLETS=/src/services/inventory/triplets \
     && cmake --build build --target inventory_server
 
 # ---- runtime stage: slim image with only the runtime shared libraries ----
