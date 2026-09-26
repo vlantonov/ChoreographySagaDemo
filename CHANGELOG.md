@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Added `python3` (required to build `vcpkg-tool-meson`), the GNU autotools packages
   (`autoconf`, `automake`, `libtool`, `autoconf-archive`) used by transitive grpc/protobuf
   ports, and `bison`/`flex` (required by the `libpq` port) to the build stage.
+- **Inventory server compilation (OpenTelemetry C++ API).** First full server build surfaced
+  two genuine compile errors in `obs_otel.cpp`: `TextMapPropagator::Extract` takes a non-const
+  `Context&` and cannot bind the `RuntimeContext::GetCurrent()` temporary (now passed via a
+  named lvalue), and `AddMetricReader` exists only on the SDK `MeterProvider` (now downcast
+  from the API type returned by `MeterProviderFactory::Create`).
 
 ## [0.1.2] — 2026-09-26
 

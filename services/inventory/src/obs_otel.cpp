@@ -21,6 +21,7 @@
 #include <opentelemetry/metrics/provider.h>
 #include <opentelemetry/metrics/sync_instruments.h>
 #include <opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_factory.h>
+#include <opentelemetry/sdk/metrics/meter_provider.h>
 #include <opentelemetry/sdk/metrics/meter_provider_factory.h>
 #include <opentelemetry/sdk/metrics/view/view_registry.h>
 #include <opentelemetry/sdk/resource/resource.h>
@@ -102,7 +103,10 @@ void setup(const std::string& service_name, const std::string& otlp_endpoint) {
       std::move(metric_exporter), reader_opts);
   auto meter_provider = otel::sdk::metrics::MeterProviderFactory::Create(
       std::make_unique<otel::sdk::metrics::ViewRegistry>(), resource);
-  meter_provider->AddMetricReader(std::move(reader));
+  // MeterProviderFactory::Create returns the API MeterProvider; AddMetricReader
+  // lives on the SDK MeterProvider, so downcast the owned object.
+  static_cast<otel::sdk::metrics::MeterProvider*>(meter_provider.get())
+      ->AddMetricReader(std::move(reader));
   std::shared_ptr<otel::metrics::MeterProvider> shared_meter_provider =
       std::move(meter_provider);
   otel::metrics::Provider::SetMeterProvider(shared_meter_provider);
@@ -177,7 +181,9 @@ SpanScope start_span(std::string_view name, const std::string& traceparent) {
   if (g_propagator && !traceparent.empty()) {
     MapCarrier carrier;
     carrier.data["traceparent"] = traceparent;
-    const auto ctx = g_propagator->Extract(carrier, otel::context::RuntimeContext::GetCurrent());
+    // Extract takes a non-const Context& (in/out), so pass a named lvalue.
+    auto current = otel::context::RuntimeContext::GetCurrent();
+    const auto ctx = g_propagator->Extract(carrier, current);
     opts.parent = otel::trace::GetSpan(ctx)->GetContext();
   }
   holder.impl_ = new SpanScope::Impl();
