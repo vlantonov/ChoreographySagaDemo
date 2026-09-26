@@ -6,9 +6,13 @@ FROM ubuntu:24.04 AS build
 ENV DEBIAN_FRONTEND=noninteractive \
     VCPKG_ROOT=/opt/vcpkg \
     VCPKG_DEFAULT_BINARY_CACHE=/opt/vcpkg-cache
+# python3 is required for vcpkg to build vcpkg-tool-meson; the autotools
+# packages (autoconf/automake/libtool/autoconf-archive) are needed by several
+# transitive grpc/protobuf ports that build with GNU autotools.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential cmake ninja-build git curl zip unzip tar pkg-config \
-        ca-certificates linux-libc-dev \
+        autoconf autoconf-archive automake build-essential ca-certificates \
+        cmake curl git libtool linux-libc-dev ninja-build pkg-config python3 \
+        tar unzip zip \
     && rm -rf /var/lib/apt/lists/*
 # Bootstrap vcpkg (dependency manager per tech-stack §13).
 RUN git clone --depth 1 https://github.com/microsoft/vcpkg "$VCPKG_ROOT" \
