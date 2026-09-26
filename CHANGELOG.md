@@ -10,10 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Inventory image build (vcpkg stage).** The C++ Inventory Dockerfile build stage did not
-  install `python3`, so vcpkg could not build its `vcpkg-tool-meson` and the image build
-  failed (with downstream "Ninja / CXX compiler not set" fallout). Added `python3` plus the
-  GNU autotools packages (`autoconf`, `automake`, `libtool`, `autoconf-archive`) commonly
-  needed by transitive grpc/protobuf ports to the build stage.
+  install the native build tools vcpkg needs for its port graph, so the image build failed.
+  Added `python3` (required to build `vcpkg-tool-meson`), the GNU autotools packages
+  (`autoconf`, `automake`, `libtool`, `autoconf-archive`) used by transitive grpc/protobuf
+  ports, and `bison`/`flex` (required by the `libpq` port) to the build stage.
 
 ## [0.1.2] — 2026-09-26
 

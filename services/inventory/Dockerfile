@@ -8,11 +8,12 @@ ENV DEBIAN_FRONTEND=noninteractive \
     VCPKG_DEFAULT_BINARY_CACHE=/opt/vcpkg-cache
 # python3 is required for vcpkg to build vcpkg-tool-meson; the autotools
 # packages (autoconf/automake/libtool/autoconf-archive) are needed by several
-# transitive grpc/protobuf ports that build with GNU autotools.
+# transitive grpc/protobuf ports that build with GNU autotools; bison and flex
+# are required by the libpq port's parser/lexer generation.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        autoconf autoconf-archive automake build-essential ca-certificates \
-        cmake curl git libtool linux-libc-dev ninja-build pkg-config python3 \
-        tar unzip zip \
+        autoconf autoconf-archive automake bison build-essential \
+        ca-certificates cmake curl flex git libtool linux-libc-dev \
+        ninja-build pkg-config python3 tar unzip zip \
     && rm -rf /var/lib/apt/lists/*
 # Bootstrap vcpkg (dependency manager per tech-stack §13).
 RUN git clone --depth 1 https://github.com/microsoft/vcpkg "$VCPKG_ROOT" \
