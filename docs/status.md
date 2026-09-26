@@ -38,6 +38,13 @@ New-project chain: **requirements-analyst → system-architect → developer →
 - Documentation stage (README/CHANGELOG + demo scripts + go.mod fix): `896b7e2` semver(minor).
 - Version publish: v0.1.0 (initial release, MINOR).
 - Maintenance: fix C++ Inventory CI build (Maintenance Engineer) → v0.1.1 (PATCH).
+- Docs: mermaid compensation-diagram render fix → v0.1.2 (PATCH).
+- Maintenance (CI image build): inventory Docker vcpkg toolchain brought to green over several
+  PATCH fixes — build-stage native tools (`python3`, autotools, `bison`/`flex`) and two
+  OpenTelemetry C++ server compile fixes in `obs_otel.cpp` (Extract lvalue, SDK MeterProvider
+  downcast) → v0.1.3 (PATCH). Full inventory image now builds end-to-end in CI.
+- Hardening (Release Engineer): pinned vcpkg to tag `2026.07.29` + matching `builtin-baseline`
+  and a release-only overlay triplet (reproducible, ~half build time) → v0.1.4 (PATCH), CI green.
 
 ## Post-release maintenance
 - **CI fix (C++ Inventory):** the outbox SLO-metrics change left three interface members
@@ -47,6 +54,10 @@ New-project chain: **requirements-analyst → system-architect → developer →
   `Relay.PendingCountTracksUnpublishedRows` regression test added. CI-equivalent core+tests
   build passes 11/11. The `db.cpp` production fix still needs the full vcpkg/Docker server
   build to compile-verify.
+- **RESOLVED — full inventory server build is green in CI (v0.1.3):** the vcpkg toolchain
+  build (grpc/protobuf/libpqxx/librdkafka/opentelemetry-cpp) compiles the server end-to-end,
+  so `db.cpp` and the OTel wiring are now compile-verified by CI. Build is reproducible and
+  release-only after v0.1.4.
 
 ## Documentation-stage doc drift (resolved)
 - Demo scripts `scripts/run-demo.sh` and `scripts/force-failure.sh` now shipped (target the
